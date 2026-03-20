@@ -83,7 +83,7 @@ For Phase 1, capture context should be attached inside the center note workspace
 
 ### Concept Node
 
-The previous `Tag` concept should be strengthened into a reusable typed concept entity. A concept node is not a flat string label attached directly to a note. It is a reusable semantic unit that can later support search filters, graph projections, clustering, and insight generation.
+A concept node is a reusable typed concept entity. It is not a flat string label attached directly to a note. It is a reusable semantic unit that can later support search filters, graph projections, clustering, and insight generation.
 
 Recommended fields:
 
@@ -279,23 +279,22 @@ This model keeps context separate from canonical notes while still allowing:
 - linking image-derived concepts back to the note meaning
 - future multimodal features without redesigning the note model
 
-## Storage Architecture Options
+## Storage Architecture
 
-Storage is a primary design decision for Seton, not an implementation detail. The product needs a storage model that preserves local-first capture speed, supports derived metadata and AI job history, and leaves room for graph and sync features without turning Phase 1 into infrastructure work.
+Storage is a primary design decision for Seton, not an implementation detail. The chosen architecture is a SQLite-first relational local model. SQLite is the only system of record in Phase 1, and the application uses an internal database rather than Markdown files or a filesystem-centered note model.
 
-### Option A: SQLite-First Relational Local Model
+Canonical and derived records should both live in the local relational store, with the canonical core kept clearly separate from revisable derived tables.
 
-This is the recommended base architecture.
-
-Canonical and derived records both live in a local relational store, with the canonical core clearly separated from revisable derived tables.
-
-Example tables:
+Recommended canonical tables:
 
 - `notes`
 - `capture_contexts`
 - `capture_context_text`
 - `capture_context_images`
 - `capture_context_urls`
+
+Recommended derived tables for later phases:
+
 - `concept_nodes`
 - `note_concepts`
 - `keywords`
@@ -306,93 +305,15 @@ Example tables:
 - `document_note_links`
 - `ai_jobs`
 
-Assessment:
+This architecture preserves local-first capture speed, keeps the save path as a small local transaction, and leaves room for the later derived layer without forcing AI or graph work into the first release.
 
-- fit for local-first: excellent
-- implementation complexity: lowest of the viable options
-- capture performance: excellent, because note save is a small local transaction
-- retrieval performance: strong for structured filters and recent-history views; good text search if paired with SQLite FTS
-- support for derived metadata and AI jobs: strong, because the relational model handles provenance, statuses, and recalculation metadata well
-- graph-readiness: good, because graph features can be projected from concept and relationship tables later
-- sync/collaboration implications: requires extra architecture later
-- migration risk: low, especially if domain logic is kept behind ports
+Planned storage evolution:
 
-The main weakness is that semantic retrieval and richer graph traversal are not free. They need explicit derived subsystems.
-
-### Option B: SQLite + Embeddings / Vector Index
-
-This keeps the SQLite relational core but adds a semantic retrieval subsystem. The vector index may live in SQLite if the chosen stack supports it well, or in a sidecar index managed as a derived local artifact.
-
-Assessment:
-
-- fit for local-first: very strong, as long as embeddings are cached locally and the app works without remote services
-- implementation complexity: moderate
-- capture performance: still strong if embedding generation is asynchronous after save
-- retrieval performance: best option for hybrid search because it combines exact and semantic signals
-- support for derived metadata and AI jobs: strong, but requires model-version tracking and re-index policies
-- graph-readiness: improved indirectly because concept similarity and retrieval become richer
-- sync/collaboration implications: more complex than plain relational because vectors must be regenerated or synced carefully
-- migration risk: moderate but manageable if vectors are treated as rebuildable derived data
-
-This is the best medium-term evolution of Option A. It should not replace the relational core. It should sit beside it.
-
-### Option C: Relational Core + Derived Graph Projections
-
-In this model, relational tables remain the source of truth, while graph views are generated into memory, materialized tables, or a separate graph-oriented read model for exploration features.
-
-Assessment:
-
-- fit for local-first: strong
-- implementation complexity: moderate
-- capture performance: excellent, because graph updates can be deferred
-- retrieval performance: good for normal note search; strong for graph-centric exploration once projections exist
-- support for derived metadata and AI jobs: strong, because graph relationships are still derived from stable relational inputs
-- graph-readiness: best path if graph features matter later but should not distort Phase 1
-- sync/collaboration implications: acceptable, because the relational source of truth stays authoritative
-- migration risk: low to moderate, since projections can be rebuilt
-
-This is the right way to become graph-ready without making the graph the canonical storage model too early.
-
-### Option D: Convex as an Alternative
-
-Convex is worth discussing because it offers a compelling model for reactive data access, server functions, and sync-friendly application behavior. It could simplify some future collaborative or multi-device concerns, especially if the product shifts from strictly local-first desktop toward synced personal knowledge infrastructure.
-
-Assessment:
-
-- fit for local-first: weaker than SQLite-first if the goal is that the local desktop database remains primary and fully functional offline by default
-- implementation complexity: moderate to high, depending on how much local/offline behavior must mirror the server model
-- capture performance: potentially strong in connected cases, but local durability semantics become more complex if Convex is not the sole system of record
-- retrieval performance: good for reactive app behavior and server-managed indexes, less ideal as the foundational answer to offline-first personal capture
-- support for derived metadata and AI jobs: strong for cloud-oriented workflows
-- graph-readiness: acceptable, but not inherently better than relational-plus-projection for this product shape
-- sync/collaboration implications: much stronger than pure local SQLite
-- migration risk: higher if adopted too early, because it can pull the architecture toward cloud-primary assumptions
-
-Convex becomes more attractive if the product later needs:
-
-- seamless cross-device sync
-- collaborative notes or shared workspaces
-- cloud-managed background jobs
-- server-authoritative reactive state
-
-It is not the right Phase 1 foundation for a local-first desktop thinking tool whose key promise is immediate local capture and private local organization.
-
-## Storage Recommendation
-
-The document should make a clear architectural recommendation:
-
-1. Use a SQLite-first relational core as the Phase 1 system of record.
-2. Add full-text search and retrieval-oriented indexes locally.
-3. Add embeddings as a derived subsystem once hybrid retrieval is needed.
+1. Use the SQLite relational core as the Phase 1 system of record.
+2. Add local full-text and retrieval-oriented indexes when the retrieval workspace becomes product-critical.
+3. Add embeddings as a rebuildable derived subsystem once hybrid retrieval is needed.
 4. Add graph projections as a read model when concept exploration becomes product-critical.
-5. Keep the domain hexagonal so PostgreSQL, Convex, or another sync-capable backend can be introduced later without rewriting the domain model around one storage choice.
-
-This gives Seton the right order of operations:
-
-- strong local capture first
-- useful retrieval second
-- richer semantic and graph features third
-- optional sync architecture only when justified by product pull
+5. Keep the domain hexagonal so later sync-capable infrastructure can be introduced without rewriting the core product model around it.
 
 ## Platform Assumptions
 
@@ -585,7 +506,7 @@ Decisions to defer:
 - the exact ranking formula for hybrid retrieval
 - the exact graph visualization strategy
 - whether embeddings live inside SQLite or in a sidecar vector index
-- when, if ever, a PostgreSQL or Convex-backed sync architecture becomes necessary
+- when, if ever, a sync-capable backend architecture becomes necessary
 
 ## Open Product Questions For Later
 
