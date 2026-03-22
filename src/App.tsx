@@ -153,19 +153,7 @@ export default function App() {
         type="button"
         onClick={() => setSettingsOpen((open) => !open)}
       >
-        <svg
-          aria-hidden="true"
-          className="settings-trigger__icon"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="square"
-          strokeLinejoin="miter"
-        >
-          <circle cx="12" cy="12" r="3.25" />
-          <path d="M12 2.75v3.1M12 18.15v3.1M21.25 12h-3.1M5.85 12h-3.1M18.54 5.46l-2.19 2.19M7.65 16.35l-2.19 2.19M18.54 18.54l-2.19-2.19M7.65 7.65L5.46 5.46" />
-        </svg>
+        <span aria-hidden="true" className="settings-trigger__glyph">✦</span>
       </button>
 
       {settingsOpen ? (

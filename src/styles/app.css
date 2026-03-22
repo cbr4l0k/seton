@@ -13,8 +13,8 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-size: 11px;
-  --paper: #efefee;
-  --paper-warm: #e6e5e1;
+  --paper: #f3f0e8;
+  --paper-warm: #ebe5da;
   --steel: #7a838f;
   --steel-dark: #39414b;
   --ink: #17191c;
@@ -38,7 +38,7 @@ body {
   font-family: "Departure Mono", monospace;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0)),
-    linear-gradient(180deg, var(--paper) 0%, var(--paper-warm) 100%);
+    linear-gradient(180deg, var(--paper) 0%, #ece6dc 100%);
   color: var(--ink);
   overflow: hidden;
 }
@@ -56,16 +56,16 @@ textarea {
   overflow: hidden;
   padding: 24px;
   background:
-    linear-gradient(90deg, rgba(23, 25, 28, 0.018) 1px, transparent 1px) 0 0 / 32px 32px,
-    linear-gradient(rgba(23, 25, 28, 0.018) 1px, transparent 1px) 0 0 / 32px 32px,
-    linear-gradient(180deg, rgba(255, 255, 255, 0.2), transparent 22%);
+    linear-gradient(90deg, rgba(23, 25, 28, 0.025) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(rgba(23, 25, 28, 0.025) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(180deg, rgba(255, 255, 255, 0.28), transparent 22%);
 }
 
 .app-shell::before {
   content: "";
   position: absolute;
   inset: 18px;
-  border: 1px solid rgba(23, 25, 28, 0.06);
+  border: 1px solid rgba(23, 25, 28, 0.08);
   pointer-events: none;
 }
 
@@ -77,8 +77,8 @@ textarea {
   pointer-events: none;
   z-index: 0;
   background:
-    radial-gradient(circle at 50% 10%, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0) 28%),
-    var(--paper);
+    radial-gradient(circle at 50% 10%, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0) 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 100%);
 }
 
 .ambient-ribbon,
@@ -116,26 +116,25 @@ textarea {
 .ambient-ribbon--green::before {
   background: linear-gradient(
     90deg,
-    rgba(168, 255, 120, 0.72) 0%,
-    rgba(120, 243, 170, 0.76) 28%,
-    rgba(95, 222, 227, 0.46) 62%,
-    rgba(95, 222, 227, 0.08) 84%,
-    rgba(95, 222, 227, 0) 100%
+    rgba(91, 170, 140, 0.08) 0%,
+    rgba(91, 170, 140, 0.22) 30%,
+    rgba(148, 170, 187, 0.2) 64%,
+    rgba(148, 170, 187, 0.03) 84%,
+    rgba(148, 170, 187, 0) 100%
   );
-  filter: blur(34px);
-  opacity: 0.58;
+  filter: blur(46px);
+  opacity: 0.9;
 }
 
 .ambient-ribbon--green::after {
   background: linear-gradient(
     90deg,
-    rgba(255, 191, 105, 0.18) 0%,
-    rgba(255, 154, 158, 0.28) 18%,
-    rgba(255, 205, 86, 0.34) 40%,
-    rgba(168, 255, 120, 0.18) 64%,
-    rgba(168, 255, 120, 0) 100%
+    rgba(183, 158, 123, 0.06) 0%,
+    rgba(183, 158, 123, 0.12) 22%,
+    rgba(91, 170, 140, 0.07) 62%,
+    rgba(91, 170, 140, 0) 100%
   );
-  filter: blur(38px);
+  filter: blur(52px);
   opacity: 0.16;
   animation: ambient-color-fade-a 18s ease-in-out infinite alternate;
 }
@@ -152,27 +151,27 @@ textarea {
 .ambient-ribbon--cyan::before {
   background: linear-gradient(
     90deg,
-    rgba(120, 240, 214, 0.08) 0%,
-    rgba(120, 240, 214, 0.28) 20%,
-    rgba(95, 222, 227, 0.62) 48%,
-    rgba(84, 166, 255, 0.72) 78%,
-    rgba(129, 140, 248, 0.28) 100%
+    rgba(132, 150, 168, 0.04) 0%,
+    rgba(132, 150, 168, 0.12) 20%,
+    rgba(122, 131, 143, 0.24) 48%,
+    rgba(90, 103, 116, 0.24) 78%,
+    rgba(90, 103, 116, 0.08) 100%
   );
-  filter: blur(36px);
-  opacity: 0.48;
+  filter: blur(44px);
+  opacity: 0.82;
 }
 
 .ambient-ribbon--cyan::after {
   background: linear-gradient(
     90deg,
-    rgba(255, 206, 84, 0.1) 0%,
-    rgba(255, 159, 67, 0.2) 18%,
-    rgba(120, 240, 214, 0.18) 42%,
-    rgba(84, 166, 255, 0.28) 76%,
-    rgba(84, 166, 255, 0.12) 100%
+    rgba(183, 158, 123, 0.03) 0%,
+    rgba(183, 158, 123, 0.06) 18%,
+    rgba(122, 131, 143, 0.06) 42%,
+    rgba(90, 103, 116, 0.1) 76%,
+    rgba(90, 103, 116, 0.03) 100%
   );
-  filter: blur(40px);
-  opacity: 0.12;
+  filter: blur(54px);
+  opacity: 0.14;
   animation: ambient-color-fade-b 24s ease-in-out infinite alternate;
 }
 
@@ -188,26 +187,26 @@ textarea {
 .ambient-ribbon--lower::before {
   background: linear-gradient(
     90deg,
-    rgba(168, 255, 120, 0.26) 0%,
-    rgba(100, 239, 183, 0.4) 34%,
-    rgba(95, 220, 220, 0.46) 62%,
-    rgba(90, 160, 255, 0.18) 100%
+    rgba(91, 170, 140, 0.08) 0%,
+    rgba(91, 170, 140, 0.12) 34%,
+    rgba(148, 170, 187, 0.16) 62%,
+    rgba(122, 131, 143, 0.08) 100%
   );
-  filter: blur(30px);
-  opacity: 0.34;
+  filter: blur(36px);
+  opacity: 0.58;
 }
 
 .ambient-ribbon--lower::after {
   background: linear-gradient(
     90deg,
-    rgba(255, 120, 120, 0.08) 0%,
-    rgba(255, 205, 86, 0.16) 24%,
-    rgba(168, 255, 120, 0.18) 46%,
-    rgba(120, 243, 170, 0.16) 64%,
-    rgba(95, 220, 220, 0.08) 100%
+    rgba(183, 158, 123, 0.03) 0%,
+    rgba(183, 158, 123, 0.05) 24%,
+    rgba(91, 170, 140, 0.05) 46%,
+    rgba(148, 170, 187, 0.05) 64%,
+    rgba(148, 170, 187, 0.02) 100%
   );
-  filter: blur(34px);
-  opacity: 0.1;
+  filter: blur(42px);
+  opacity: 0.12;
   animation: ambient-color-fade-c 20s ease-in-out infinite alternate;
 }
 
@@ -229,24 +228,23 @@ textarea {
 .ambient-shape--green::before {
   background: radial-gradient(
     circle at 52% 42%,
-    rgba(168, 255, 120, 0.72) 0%,
-    rgba(120, 243, 170, 0.54) 42%,
-    rgba(120, 243, 170, 0.14) 70%,
-    rgba(120, 243, 170, 0) 100%
+    rgba(91, 170, 140, 0.24) 0%,
+    rgba(91, 170, 140, 0.14) 42%,
+    rgba(91, 170, 140, 0.03) 70%,
+    rgba(91, 170, 140, 0) 100%
   );
-  filter: blur(20px);
-  opacity: 0.44;
+  filter: blur(26px);
 }
 
 .ambient-shape--green::after {
   background: radial-gradient(
     circle at 48% 46%,
-    rgba(255, 191, 105, 0.2) 0%,
-    rgba(255, 154, 158, 0.16) 28%,
-    rgba(255, 154, 158, 0) 68%
+    rgba(183, 158, 123, 0.08) 0%,
+    rgba(183, 158, 123, 0.06) 28%,
+    rgba(183, 158, 123, 0) 68%
   );
-  filter: blur(24px);
-  opacity: 0.1;
+  filter: blur(30px);
+  opacity: 0.14;
   animation: ambient-color-fade-a 16s ease-in-out infinite alternate;
 }
 
@@ -264,41 +262,39 @@ textarea {
 .ambient-shape--blue::before {
   background: radial-gradient(
     circle at 42% 48%,
-    rgba(100, 182, 255, 0.56) 0%,
-    rgba(96, 160, 255, 0.42) 48%,
-    rgba(96, 160, 255, 0.1) 72%,
-    rgba(96, 160, 255, 0) 100%
+    rgba(122, 131, 143, 0.22) 0%,
+    rgba(148, 170, 187, 0.16) 48%,
+    rgba(148, 170, 187, 0.04) 72%,
+    rgba(148, 170, 187, 0) 100%
   );
-  filter: blur(22px);
-  opacity: 0.34;
+  filter: blur(28px);
 }
 
 .ambient-shape--blue::after {
   background: radial-gradient(
     circle at 46% 44%,
-    rgba(167, 139, 250, 0.2) 0%,
-    rgba(129, 140, 248, 0.16) 32%,
-    rgba(129, 140, 248, 0) 70%
+    rgba(90, 103, 116, 0.08) 0%,
+    rgba(122, 131, 143, 0.08) 32%,
+    rgba(122, 131, 143, 0) 70%
   );
-  filter: blur(26px);
-  opacity: 0.1;
+  filter: blur(34px);
+  opacity: 0.14;
   animation: ambient-color-fade-b 18s ease-in-out infinite alternate;
 }
 
 .ambient-veil {
   inset: 0;
   background:
-    radial-gradient(circle at 50% 34%, rgba(255,255,255,0.34) 0%, rgba(255,255,255,0.12) 18%, rgba(255,255,255,0) 34%),
-    radial-gradient(circle at 54% 54%, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.06) 20%, rgba(255,255,255,0) 36%);
-  opacity: 0.62;
+    radial-gradient(circle at 50% 34%, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.06) 18%, rgba(255, 255, 255, 0) 34%),
+    radial-gradient(circle at 54% 54%, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.03) 20%, rgba(255, 255, 255, 0) 36%);
 }
 
 .ambient-grain {
   inset: 0;
-  opacity: 0.04;
+  opacity: 0.08;
   background-image:
-    radial-gradient(rgba(255,255,255,0.65) 0.6px, transparent 0.8px),
-    radial-gradient(rgba(0,0,0,0.05) 0.6px, transparent 0.8px);
+    radial-gradient(rgba(255, 255, 255, 0.05) 0.6px, transparent 0.8px),
+    radial-gradient(rgba(0, 0, 0, 0.08) 0.6px, transparent 0.8px);
   background-size: 3px 3px, 5px 5px;
   background-position: 0 0, 1px 1px;
   mix-blend-mode: soft-light;
@@ -336,9 +332,10 @@ textarea {
   color: var(--accent);
 }
 
-.settings-trigger__icon {
-  width: 14px;
-  height: 14px;
+.settings-trigger__glyph {
+  display: block;
+  font-size: 14px;
+  line-height: 1;
 }
 
 .settings-backdrop {
