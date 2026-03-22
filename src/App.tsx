@@ -169,15 +169,39 @@ export default function App() {
       </button>
 
       {settingsOpen ? (
-        <div className="settings-popover">
-          <label className="settings-option">
-            <input
-              checked={requestAnalysisAfterSave}
-              type="checkbox"
-              onChange={(event) => setRequestAnalysisAfterSave(event.target.checked)}
-            />
-            <span>Request analysis after save</span>
-          </label>
+        <div className="settings-backdrop" role="presentation" onClick={() => setSettingsOpen(false)}>
+          <section
+            aria-labelledby="settings-panel-title"
+            aria-modal="true"
+            className="settings-popover"
+            role="dialog"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="settings-popover__header">
+              <p className="panel-subtle-title">Settings</p>
+              <button
+                aria-label="Close settings"
+                className="settings-close"
+                type="button"
+                onClick={() => setSettingsOpen(false)}
+              >
+                x
+              </button>
+            </div>
+
+            <h2 className="settings-popover__title" id="settings-panel-title">
+              Workspace settings
+            </h2>
+
+            <label className="settings-option">
+              <input
+                checked={requestAnalysisAfterSave}
+                type="checkbox"
+                onChange={(event) => setRequestAnalysisAfterSave(event.target.checked)}
+              />
+              <span>Request analysis after save</span>
+            </label>
+          </section>
         </div>
       ) : null}
 

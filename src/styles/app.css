@@ -305,6 +305,7 @@ textarea {
 }
 
 .settings-trigger,
+.settings-backdrop,
 .settings-popover,
 .panel,
 .save-toast,
@@ -340,15 +341,50 @@ textarea {
   height: 14px;
 }
 
-.settings-popover {
+.settings-backdrop {
   position: absolute;
-  top: 68px;
-  right: 24px;
+  inset: 0;
+  z-index: 7;
+  display: grid;
+  place-items: center;
+  background: rgba(111, 118, 128, 0.18);
+  backdrop-filter: blur(4px);
+}
+
+.settings-popover {
+  width: min(520px, calc(100vw - 64px));
   border: 1px solid var(--line-strong);
   border-radius: 0;
   background: rgba(243, 240, 232, 0.94);
-  padding: 14px 16px;
+  padding: 18px 20px 20px;
   box-shadow: none;
+  z-index: 8;
+}
+
+.settings-popover__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.settings-popover__title {
+  margin: 0 0 24px;
+  font-size: 22px;
+  line-height: 1.2;
+  font-weight: inherit;
+}
+
+.settings-close {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .settings-option {
@@ -773,8 +809,7 @@ textarea {
   }
 
   .settings-popover {
-    top: 58px;
-    right: 16px;
+    width: min(520px, calc(100vw - 32px));
   }
 
   .ambient-ribbon--green {

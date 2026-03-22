@@ -30,6 +30,15 @@ test("bundles Departure Mono from a local asset", () => {
   expect(departureMonoFontUrl).not.toContain("https://departuremono.com/");
 });
 
+test("opens settings as a dedicated front panel", () => {
+  render(<App />);
+
+  fireEvent.click(screen.getByLabelText("Settings"));
+
+  expect(screen.getByRole("dialog", { name: "Workspace settings" })).toBeInTheDocument();
+  expect(screen.getByText("Workspace settings")).toBeInTheDocument();
+});
+
 test("arrow keys move between center and placeholder panels", () => {
   render(<App />);
 
