@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import App from "../App";
+import departureMonoFontUrl from "../assets/fonts/DepartureMono-Regular.woff2?url";
 
 vi.mock("../lib/tauri", () => ({
   bootstrapWorkspace: vi.fn().mockResolvedValue({ history: [], placeholders: [] }),
@@ -22,6 +23,11 @@ test("renders ambient shell layers and workspace chrome", () => {
   expect(screen.getByTestId("ambient-background")).toBeInTheDocument();
   expect(screen.getAllByTestId("ambient-ribbon")).toHaveLength(3);
   expect(screen.getAllByTestId("ambient-shape")).toHaveLength(2);
+});
+
+test("bundles Departure Mono from a local asset", () => {
+  expect(departureMonoFontUrl).toContain("DepartureMono-Regular.woff2");
+  expect(departureMonoFontUrl).not.toContain("https://departuremono.com/");
 });
 
 test("arrow keys move between center and placeholder panels", () => {
