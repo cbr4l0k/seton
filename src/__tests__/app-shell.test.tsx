@@ -1,7 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import App from "../App";
 import departureMonoFontUrl from "../assets/fonts/DepartureMono-Regular.woff2?url";
+import { bootstrapWorkspace } from "../lib/tauri";
 
 vi.mock("../lib/tauri", () => ({
   bootstrapWorkspace: vi.fn().mockResolvedValue({ history: [], placeholders: [] }),
@@ -10,6 +11,10 @@ vi.mock("../lib/tauri", () => ({
   openNote: vi.fn(),
   pickImageFile: vi.fn(),
 }));
+
+beforeEach(() => {
+  vi.mocked(bootstrapWorkspace).mockResolvedValue({ history: [], placeholders: [] });
+});
 
 test("renders the Thought Inbox shell", () => {
   render(<App />);
@@ -75,4 +80,24 @@ test("escape inside the editor blurs before panel navigation resumes", () => {
 
   fireEvent.keyDown(window, { key: "ArrowLeft" });
   expect(screen.getByLabelText("Concept Graph panel")).toHaveAttribute("data-active", "true");
+});
+
+test("bottom notes panel provides a focusable scroll region when notes overflow", async () => {
+  vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
+    history: Array.from({ length: 18 }, (_, index) => ({
+      id: `note-${index}`,
+      preview: `Overflow note ${index}`,
+      lastOpenedAt: null,
+      updatedAt: `2026-03-${String(index + 1).padStart(2, "0")}`,
+    })),
+    placeholders: [],
+  });
+
+  render(<App />);
+
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+
+  const scrollRegion = await screen.findByLabelText("Notes list");
+  expect(screen.getByLabelText("Notes panel")).toHaveAttribute("data-active", "true");
+  expect(scrollRegion).toHaveAttribute("tabindex", "0");
 });
