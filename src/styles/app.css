@@ -591,10 +591,18 @@ textarea {
   gap: 10px;
 }
 
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
 .history-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 8px;
+  align-items: center;
 }
 
 .history-item {
@@ -623,6 +631,37 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.history-export {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  padding: 8px 12px;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+
+.history-export:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.history-export:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.history-select {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+}
+
+.history-select input {
+  margin: 0;
+  accent-color: var(--accent);
 }
 
 .history-delete {

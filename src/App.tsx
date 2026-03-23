@@ -7,7 +7,7 @@ import { PlaceholderPanel } from "./components/PlaceholderPanel";
 import { WorkspaceCanvas } from "./components/WorkspaceCanvas";
 import { useSpatialNavigation } from "./hooks/useSpatialNavigation";
 import type { DraftCaptureContext } from "./components/CaptureContextEditor";
-import { bootstrapWorkspace, deleteNote, openNote, saveNote } from "./lib/tauri";
+import { bootstrapWorkspace, deleteNote, exportNotesMarkdown, openNote, saveNote } from "./lib/tauri";
 import type { CaptureContext, RecentNote, SaveNoteRequest } from "./lib/types";
 
 type LoadedDraftSnapshot = {
@@ -22,6 +22,7 @@ export default function App() {
   const [body, setBody] = useState("");
   const [contexts, setContexts] = useState<DraftCaptureContext[]>([]);
   const [historyItems, setHistoryItems] = useState<RecentNote[]>([]);
+  const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
   const [currentNoteId, setCurrentNoteId] = useState<string | null>(null);
   const [requestAnalysisAfterSave, setRequestAnalysisAfterSave] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -102,6 +103,7 @@ export default function App() {
   async function handleDeleteNote(noteId: string) {
     await deleteNote(noteId);
     setHistoryItems((current) => current.filter((item) => item.id !== noteId));
+    setSelectedNoteIds((current) => current.filter((id) => id !== noteId));
 
     if (currentNoteId === noteId) {
       setCurrentNoteId(null);
@@ -143,6 +145,31 @@ export default function App() {
     }
 
     await commitSave(requestAnalysisAfterSave);
+  }
+
+  async function handleExportSelectedNotes() {
+    const noteIds = historyItems
+      .filter((item) => selectedNoteIds.includes(item.id))
+      .map((item) => item.id);
+
+    if (noteIds.length === 0) {
+      return;
+    }
+
+    const exported = await exportNotesMarkdown(noteIds);
+    if (exported) {
+      setToastMessage("exported");
+    }
+  }
+
+  function handleHistorySelectionChange(noteId: string, checked: boolean) {
+    setSelectedNoteIds((current) => {
+      if (checked) {
+        return current.includes(noteId) ? current : [...current, noteId];
+      }
+
+      return current.filter((id) => id !== noteId);
+    });
   }
 
   return (
@@ -224,7 +251,10 @@ export default function App() {
         active={position === "bottom"}
         items={historyItems}
         onDelete={(noteId) => void handleDeleteNote(noteId)}
+        onExport={() => void handleExportSelectedNotes()}
         onOpen={(noteId) => void handleOpenNote(noteId)}
+        onSelectionChange={handleHistorySelectionChange}
+        selectedNoteIds={selectedNoteIds}
       />
 
       {toastMessage ? <div className="save-toast">{toastMessage}</div> : null}

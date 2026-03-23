@@ -3,7 +3,7 @@ use std::path::Path;
 
 use chrono::Utc;
 use sha2::{Digest, Sha256};
-use sqlx::SqlitePool;
+use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 use uuid::Uuid;
 
 use crate::app_state::AppPaths;
@@ -210,6 +210,33 @@ impl NoteRepository {
 
         Ok(())
     }
+
+    pub async fn export_notes_markdown(&self, note_ids: Vec<String>) -> Result<String, String> {
+        if note_ids.is_empty() {
+            return Err("at least one note must be selected".into());
+        }
+
+        let mut query = QueryBuilder::<Sqlite>::new("SELECT body FROM notes WHERE id IN (");
+        let mut separated = query.separated(", ");
+
+        for note_id in note_ids {
+            separated.push_bind(note_id);
+        }
+
+        separated.push_unseparated(") ORDER BY created_at ASC, id ASC");
+
+        let rows: Vec<ExportNoteRow> = query
+            .build_query_as()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|err| err.to_string())?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| row.body)
+            .collect::<Vec<_>>()
+            .join("\n\n---\n\n"))
+    }
 }
 
 #[derive(sqlx::FromRow)]
@@ -259,6 +286,11 @@ struct RecentNoteRow {
     body: String,
     last_opened_at: Option<String>,
     updated_at: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct ExportNoteRow {
+    body: String,
 }
 
 async fn persist_capture_context(
@@ -448,6 +480,101 @@ mod tests {
             .find(|item| item.is_image())
             .unwrap();
         assert!(std::path::Path::new(image.managed_path().unwrap()).exists());
+    }
+
+    #[tokio::test]
+    async fn exports_selected_notes_in_created_order() {
+        let repo = test_repo().await;
+        let newer = repo
+            .save_note(SaveNoteInput {
+                note_id: None,
+                body: "Newer note".into(),
+                capture_contexts: vec![],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+        let older = repo
+            .save_note(SaveNoteInput {
+                note_id: None,
+                body: "Older note".into(),
+                capture_contexts: vec![],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+
+        sqlx::query("UPDATE notes SET created_at = ? WHERE id = ?")
+            .bind("2026-03-20T09:00:00Z")
+            .bind(&older.id)
+            .execute(&repo.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE notes SET created_at = ? WHERE id = ?")
+            .bind("2026-03-21T09:00:00Z")
+            .bind(&newer.id)
+            .execute(&repo.pool)
+            .await
+            .unwrap();
+
+        let markdown = repo
+            .export_notes_markdown(vec![newer.id, older.id])
+            .await
+            .unwrap();
+
+        assert_eq!(markdown, "Older note\n\n---\n\nNewer note");
+    }
+
+    #[tokio::test]
+    async fn exports_notes_by_created_order_not_edit_order() {
+        let repo = test_repo().await;
+        let older = repo
+            .save_note(SaveNoteInput {
+                note_id: None,
+                body: "Older original".into(),
+                capture_contexts: vec![],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+        let newer = repo
+            .save_note(SaveNoteInput {
+                note_id: None,
+                body: "Newer original".into(),
+                capture_contexts: vec![],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+
+        sqlx::query("UPDATE notes SET created_at = ? WHERE id = ?")
+            .bind("2026-03-20T09:00:00Z")
+            .bind(&older.id)
+            .execute(&repo.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE notes SET created_at = ? WHERE id = ?")
+            .bind("2026-03-21T09:00:00Z")
+            .bind(&newer.id)
+            .execute(&repo.pool)
+            .await
+            .unwrap();
+
+        repo.save_note(SaveNoteInput {
+            note_id: Some(older.id.clone()),
+            body: "Older edited later".into(),
+            capture_contexts: vec![],
+            request_analysis: false,
+        })
+        .await
+        .unwrap();
+
+        let markdown = repo
+            .export_notes_markdown(vec![newer.id, older.id])
+            .await
+            .unwrap();
+
+        assert_eq!(markdown, "Older edited later\n\n---\n\nNewer original");
     }
 
     async fn test_repo() -> NoteRepository {

@@ -5,6 +5,7 @@ import App from "../App";
 
 const mockBootstrapWorkspace = vi.fn();
 const mockDeleteNote = vi.fn();
+const mockExportNotesMarkdown = vi.fn();
 const mockSaveNote = vi.fn();
 const mockOpenNote = vi.fn();
 const mockPickImageFile = vi.fn();
@@ -12,6 +13,7 @@ const mockPickImageFile = vi.fn();
 vi.mock("../lib/tauri", () => ({
   bootstrapWorkspace: () => mockBootstrapWorkspace(),
   deleteNote: (noteId: string) => mockDeleteNote(noteId),
+  exportNotesMarkdown: (noteIds: string[]) => mockExportNotesMarkdown(noteIds),
   saveNote: (input: unknown) => mockSaveNote(input),
   openNote: (noteId: string) => mockOpenNote(noteId),
   pickImageFile: () => mockPickImageFile(),
@@ -82,6 +84,7 @@ test("settings can enable analysis requests and save resets to a fresh draft", a
 beforeEach(() => {
   mockBootstrapWorkspace.mockReset();
   mockDeleteNote.mockReset();
+  mockExportNotesMarkdown.mockReset();
   mockSaveNote.mockReset();
   mockOpenNote.mockReset();
   mockPickImageFile.mockReset();
@@ -174,4 +177,35 @@ test("history items can be deleted", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Delete Seed note" }));
 
   expect(mockDeleteNote).toHaveBeenCalledWith("seed-note");
+});
+
+test("selected notes can be exported as markdown", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [
+      {
+        id: "older-note",
+        preview: "Older note",
+        lastOpenedAt: null,
+        updatedAt: "2026-03-20T10:00:00Z",
+      },
+      {
+        id: "newer-note",
+        preview: "Newer note",
+        lastOpenedAt: null,
+        updatedAt: "2026-03-21T10:00:00Z",
+      },
+    ],
+    placeholders: [],
+  });
+  mockExportNotesMarkdown.mockResolvedValue(undefined);
+
+  render(<App />);
+
+  expect(await screen.findByText("Older note")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByLabelText("Select Older note"));
+  fireEvent.click(screen.getByLabelText("Select Newer note"));
+  fireEvent.click(screen.getByRole("button", { name: "Export selected" }));
+
+  expect(mockExportNotesMarkdown).toHaveBeenCalledWith(["older-note", "newer-note"]);
 });

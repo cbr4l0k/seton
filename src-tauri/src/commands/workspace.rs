@@ -1,4 +1,5 @@
 use serde::Serialize;
+use tokio::fs;
 
 use crate::app_state::AppState;
 use crate::db::repository::SaveNoteInput;
@@ -95,11 +96,20 @@ pub async fn open_note(
 }
 
 #[tauri::command]
-pub async fn delete_note(
-    state: tauri::State<'_, AppState>,
-    note_id: String,
-) -> Result<(), String> {
+pub async fn delete_note(state: tauri::State<'_, AppState>, note_id: String) -> Result<(), String> {
     state.repository.delete_note(note_id).await
+}
+
+#[tauri::command]
+pub async fn export_notes_markdown(
+    state: tauri::State<'_, AppState>,
+    note_ids: Vec<String>,
+    destination_path: String,
+) -> Result<(), String> {
+    let markdown = state.repository.export_notes_markdown(note_ids).await?;
+    fs::write(destination_path, markdown)
+        .await
+        .map_err(|err| err.to_string())
 }
 
 pub async fn bootstrap_workspace_with_state(state: &AppState) -> Result<WorkspacePayload, String> {

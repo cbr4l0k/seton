@@ -27,7 +27,8 @@ pub fn run() {
             commands::workspace::bootstrap_workspace,
             commands::workspace::save_note,
             commands::workspace::open_note,
-            commands::workspace::delete_note
+            commands::workspace::delete_note,
+            commands::workspace::export_notes_markdown
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
