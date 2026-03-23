@@ -216,7 +216,9 @@ impl NoteRepository {
             return Err("at least one note must be selected".into());
         }
 
-        let mut query = QueryBuilder::<Sqlite>::new("SELECT body FROM notes WHERE id IN (");
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT id, body FROM notes WHERE id IN (",
+        );
         let mut separated = query.separated(", ");
 
         for note_id in note_ids {
@@ -231,11 +233,24 @@ impl NoteRepository {
             .await
             .map_err(|err| err.to_string())?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| row.body)
-            .collect::<Vec<_>>()
-            .join("\n\n---\n\n"))
+        let mut rendered_notes = Vec::with_capacity(rows.len());
+
+        for row in rows {
+            let capture_contexts = sqlx::query_as::<_, CaptureContextRow>(
+                "SELECT id, note_id, context_type, text_value, url_value, source_path, managed_path, created_at, updated_at
+                 FROM capture_contexts
+                 WHERE note_id = ?
+                 ORDER BY created_at ASC, id ASC",
+            )
+            .bind(&row.id)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|err| err.to_string())?;
+
+            rendered_notes.push(render_export_note(row.body, capture_contexts));
+        }
+
+        Ok(rendered_notes.join("\n\n---\n\n"))
     }
 }
 
@@ -290,7 +305,38 @@ struct RecentNoteRow {
 
 #[derive(sqlx::FromRow)]
 struct ExportNoteRow {
+    id: String,
     body: String,
+}
+
+fn render_export_note(body: String, capture_contexts: Vec<CaptureContextRow>) -> String {
+    if capture_contexts.is_empty() {
+        return body;
+    }
+
+    let context_lines = capture_contexts
+        .into_iter()
+        .map(export_context_label)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!("Context:\n{context_lines}\n\n{body}")
+}
+
+fn export_context_label(context: CaptureContextRow) -> String {
+    match context.context_type.as_str() {
+        "text" => format!("- {}", context.text_value.unwrap_or_default()),
+        "url" => format!("- {}", context.url_value.unwrap_or_default()),
+        "image" => format!(
+            "- image: {}",
+            context
+                .managed_path
+                .or(context.source_path)
+                .and_then(|path| Path::new(&path).file_name().and_then(OsStr::to_str).map(str::to_string))
+                .unwrap_or_else(|| "image".to_string())
+        ),
+        _ => "- context".to_string(),
+    }
 }
 
 async fn persist_capture_context(
@@ -489,7 +535,9 @@ mod tests {
             .save_note(SaveNoteInput {
                 note_id: None,
                 body: "Newer note".into(),
-                capture_contexts: vec![],
+                capture_contexts: vec![CaptureContextInput::Url {
+                    url: "https://example.com/newer".into(),
+                }],
                 request_analysis: false,
             })
             .await
@@ -498,7 +546,14 @@ mod tests {
             .save_note(SaveNoteInput {
                 note_id: None,
                 body: "Older note".into(),
-                capture_contexts: vec![],
+                capture_contexts: vec![
+                    CaptureContextInput::Text {
+                        text: "crypto 2nd homework".into(),
+                    },
+                    CaptureContextInput::Url {
+                        url: "https://example.com/older".into(),
+                    },
+                ],
                 request_analysis: false,
             })
             .await
@@ -522,7 +577,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(markdown, "Older note\n\n---\n\nNewer note");
+        assert_eq!(
+            markdown,
+            "Context:\n- crypto 2nd homework\n- https://example.com/older\n\nOlder note\n\n---\n\nContext:\n- https://example.com/newer\n\nNewer note"
+        );
     }
 
     #[tokio::test]
@@ -541,7 +599,9 @@ mod tests {
             .save_note(SaveNoteInput {
                 note_id: None,
                 body: "Newer original".into(),
-                capture_contexts: vec![],
+                capture_contexts: vec![CaptureContextInput::Text {
+                    text: "newer context".into(),
+                }],
                 request_analysis: false,
             })
             .await
@@ -563,7 +623,9 @@ mod tests {
         repo.save_note(SaveNoteInput {
             note_id: Some(older.id.clone()),
             body: "Older edited later".into(),
-            capture_contexts: vec![],
+            capture_contexts: vec![CaptureContextInput::Text {
+                text: "older context".into(),
+            }],
             request_analysis: false,
         })
         .await
@@ -574,7 +636,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(markdown, "Older edited later\n\n---\n\nNewer original");
+        assert_eq!(
+            markdown,
+            "Context:\n- older context\n\nOlder edited later\n\n---\n\nContext:\n- newer context\n\nNewer original"
+        );
     }
 
     async fn test_repo() -> NoteRepository {
