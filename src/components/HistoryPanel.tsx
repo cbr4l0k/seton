@@ -30,6 +30,7 @@ export function HistoryPanel({
       aria-label="Notes panel"
       className="panel panel-bottom"
       data-active={active}
+      data-size="capped"
     >
       <div className="history-header">
         <p className="panel-subtle-title">Notes</p>
@@ -43,34 +44,36 @@ export function HistoryPanel({
         </button>
       </div>
       {items.length > 0 ? (
-        <ul className="history-list">
-          {items.map((item) => (
-            <li key={item.id}>
-              <div className="history-row">
-                <label className="history-select">
-                  <input
-                    aria-label={`Select ${item.preview}`}
-                    checked={selected.has(item.id)}
-                    type="checkbox"
-                    onChange={(event) => onSelectionChange(item.id, event.target.checked)}
-                  />
-                </label>
-                <button className="history-item" type="button" onClick={() => onOpen(item.id)}>
-                  <span>{item.preview}</span>
-                  <time>{item.updatedAt}</time>
-                </button>
-                <button
-                  aria-label={`Delete ${item.preview}`}
-                  className="history-delete"
-                  type="button"
-                  onClick={() => onDelete(item.id)}
-                >
-                  x
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <div aria-label="Notes list" className="history-scroll-region" tabIndex={0}>
+          <ul className="history-list">
+            {items.map((item) => (
+              <li key={item.id}>
+                <div className="history-row">
+                  <label className="history-select">
+                    <input
+                      aria-label={`Select ${item.preview}`}
+                      checked={selected.has(item.id)}
+                      type="checkbox"
+                      onChange={(event) => onSelectionChange(item.id, event.target.checked)}
+                    />
+                  </label>
+                  <button className="history-item" type="button" onClick={() => onOpen(item.id)}>
+                    <span>{item.preview}</span>
+                    <time>{item.updatedAt}</time>
+                  </button>
+                  <button
+                    aria-label={`Delete ${item.preview}`}
+                    className="history-delete"
+                    type="button"
+                    onClick={() => onDelete(item.id)}
+                  >
+                    x
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
     </section>
   );

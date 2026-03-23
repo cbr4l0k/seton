@@ -561,7 +561,11 @@ textarea {
   left: 50%;
   bottom: 24px;
   width: min(840px, calc(100vw - 48px));
+  max-height: min(360px, calc(100vh - 120px));
+  display: flex;
+  flex-direction: column;
   padding: 20px 22px 22px;
+  overflow: hidden;
   transform: translate(-50%, 120%);
   opacity: 0;
   pointer-events: none;
@@ -585,10 +589,24 @@ textarea {
 
 .history-list {
   list-style: none;
-  margin: 16px 0 0;
+  margin: 0;
   padding: 0;
   display: grid;
   gap: 10px;
+}
+
+.history-scroll-region {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin-top: 16px;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+.history-scroll-region:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 4px;
 }
 
 .history-header {
@@ -919,6 +937,7 @@ textarea {
   }
 
   .panel-bottom {
+    max-height: min(320px, calc(100vh - 64px));
     transform: translate(0, 120%);
   }
 

@@ -97,7 +97,9 @@ test("bottom notes panel provides a focusable scroll region when notes overflow"
 
   fireEvent.keyDown(window, { key: "ArrowDown" });
 
+  const notesPanel = screen.getByLabelText("Notes panel");
   const scrollRegion = await screen.findByLabelText("Notes list");
-  expect(screen.getByLabelText("Notes panel")).toHaveAttribute("data-active", "true");
+  expect(notesPanel).toHaveAttribute("data-active", "true");
+  expect(notesPanel).toHaveAttribute("data-size", "capped");
   expect(scrollRegion).toHaveAttribute("tabindex", "0");
 });
