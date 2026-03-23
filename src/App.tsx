@@ -156,9 +156,13 @@ export default function App() {
       return;
     }
 
-    const exported = await exportNotesMarkdown(noteIds);
-    if (exported) {
-      setToastMessage("exported");
+    try {
+      const exported = await exportNotesMarkdown(noteIds);
+      if (exported) {
+        setToastMessage("exported");
+      }
+    } catch {
+      setToastMessage("export failed");
     }
   }
 
