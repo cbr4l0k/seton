@@ -230,6 +230,46 @@ test("selected notes can be exported as markdown", async () => {
   expect(mockExportNotesMarkdown).toHaveBeenCalledWith(["older-note", "newer-note"]);
 });
 
+test("saving an opened note without changes clears the editor but does not call saveNote", async () => {
+  mockBootstrapWorkspace.mockResolvedValue(makeWorkspacePayload());
+  mockOpenNote.mockResolvedValue(makeSavedNoteDetail());
+
+  render(<App />);
+
+  expect(await screen.findByText("Seed note")).toBeInTheDocument();
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+  fireEvent.click(screen.getByText("Seed note"));
+  expect(await screen.findByDisplayValue("Seed note")).toBeInTheDocument();
+
+  fireEvent.keyDown(screen.getByPlaceholderText("I'm thinking about..."), {
+    key: "Enter",
+    ctrlKey: true,
+  });
+
+  expect(mockSaveNote).not.toHaveBeenCalled();
+  expect(screen.getByPlaceholderText("I'm thinking about...")).toHaveValue("");
+});
+
+test("bootstrap history timestamps are displayed as dd.mm.yyyy", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [
+      {
+        id: "seed-note",
+        preview: "Seed note",
+        lastOpenedAt: null,
+        updatedAt: "2026-03-24T14:34:40.785121340+00:00",
+      },
+    ],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
+
+  render(<App />);
+
+  expect(await screen.findByText("24.03.2026")).toBeInTheDocument();
+});
+
 test("ArrowRight advances to the next suggestion in the belt", async () => {
   mockBootstrapWorkspace.mockResolvedValue({
     history: [],

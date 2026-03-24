@@ -146,7 +146,7 @@ export default function App() {
         return;
       }
 
-      setHistoryItems(payload.history);
+      setHistoryItems(payload.history.map(formatHistoryItem));
       setKnownTextContexts(payload.knownTextContexts ?? []);
       setTextContextRelationships(payload.textContextRelationships ?? []);
     } catch {
@@ -160,8 +160,31 @@ export default function App() {
     }
   }
 
+  function isDraftUnchanged(): boolean {
+    const snapshot = loadedSnapshot.current;
+    return (
+      currentNoteId === snapshot.noteId &&
+      body === snapshot.body &&
+      JSON.stringify(contexts) === JSON.stringify(snapshot.contexts)
+    );
+  }
+
+  function clearEditor() {
+    const preservedContexts = contexts;
+    setCurrentNoteId(null);
+    setBody("");
+    setContexts(preservedContexts);
+    syncLoadedSnapshot(null, "", preservedContexts);
+    setPosition("center");
+  }
+
   async function attemptSave() {
     if (!body.trim()) {
+      return;
+    }
+
+    if (isDraftUnchanged()) {
+      clearEditor();
       return;
     }
 
@@ -323,14 +346,21 @@ function mapDraftContextToSaveInput(context: DraftCaptureContext) {
 }
 
 function upsertHistoryItem(items: RecentNote[], noteId: string, body: string, updatedAt: string): RecentNote[] {
-  const nextItem = {
+  const nextItem = formatHistoryItem({
     id: noteId,
     preview: body.trim().slice(0, 80) || "Untitled",
     lastOpenedAt: null,
-    updatedAt: formatHistoryTimestamp(updatedAt),
-  };
+    updatedAt,
+  });
 
   return [nextItem, ...items.filter((item) => item.id !== noteId)];
+}
+
+function formatHistoryItem(item: RecentNote): RecentNote {
+  return {
+    ...item,
+    updatedAt: formatHistoryTimestamp(item.updatedAt),
+  };
 }
 
 function formatHistoryTimestamp(value: string | null) {

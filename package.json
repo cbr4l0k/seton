@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest",
-    "tauri": "mkdir -p .tmp/rustc && TMPDIR=$PWD/.tmp/rustc tauri"
+    "tauri": "mkdir -p .tmp/rustc .tmp/cargo-target && TMPDIR=$PWD/.tmp/rustc CARGO_TARGET_DIR=$PWD/.tmp/cargo-target tauri"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",
