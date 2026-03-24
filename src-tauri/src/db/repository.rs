@@ -1,4 +1,5 @@
 use std::ffi::OsStr;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 use chrono::Utc;
@@ -21,6 +22,25 @@ pub struct SaveNoteInput {
     pub body: String,
     pub capture_contexts: Vec<CaptureContextInput>,
     pub request_analysis: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct KnownTextContext {
+    pub label: String,
+    pub normalized_label: String,
+    pub use_count: i64,
+}
+
+#[derive(Clone, Debug)]
+pub struct TextContextRelationship {
+    pub left: String,
+    pub right: String,
+    pub use_count: i64,
+}
+
+pub struct TextContextSuggestionData {
+    pub known_text_contexts: Vec<KnownTextContext>,
+    pub text_context_relationships: Vec<TextContextRelationship>,
 }
 
 impl NoteRepository {
@@ -211,6 +231,105 @@ impl NoteRepository {
         Ok(())
     }
 
+    pub async fn list_text_context_suggestion_data(
+        &self,
+    ) -> Result<TextContextSuggestionData, String> {
+        let rows = self.load_text_context_rows().await?;
+        let mut contexts: BTreeMap<String, KnownTextContextSummary> = BTreeMap::new();
+        let mut note_contexts: HashMap<String, BTreeSet<String>> = HashMap::new();
+
+        for row in rows {
+            let Some((label, normalized_label)) = normalized_text_label(row.text_value.as_deref()) else {
+                continue;
+            };
+
+            contexts
+                .entry(normalized_label.clone())
+                .and_modify(|entry| {
+                    entry.use_count += 1;
+                })
+                .or_insert_with(|| KnownTextContextSummary {
+                    label,
+                    normalized_label: normalized_label.clone(),
+                    use_count: 1,
+                });
+
+            note_contexts
+                .entry(row.note_id)
+                .or_default()
+                .insert(normalized_label);
+        }
+
+        let mut known_text_contexts = contexts
+            .values()
+            .map(|summary| KnownTextContext {
+                label: summary.label.clone(),
+                normalized_label: summary.normalized_label.clone(),
+                use_count: summary.use_count,
+            })
+            .collect::<Vec<_>>();
+
+        known_text_contexts.sort_by(|left, right| {
+            right
+                .use_count
+                .cmp(&left.use_count)
+                .then_with(|| left.normalized_label.cmp(&right.normalized_label))
+        });
+
+        let mut pair_counts: BTreeMap<(String, String), i64> = BTreeMap::new();
+
+        for normalized_labels in note_contexts.into_values() {
+            let labels = normalized_labels.into_iter().collect::<Vec<_>>();
+            for left_index in 0..labels.len() {
+                for right_index in (left_index + 1)..labels.len() {
+                    let left = labels[left_index].clone();
+                    let right = labels[right_index].clone();
+                    *pair_counts.entry((left, right)).or_insert(0) += 1;
+                }
+            }
+        }
+
+        let mut text_context_relationships = pair_counts
+            .into_iter()
+            .map(|((left_normalized, right_normalized), use_count)| TextContextRelationship {
+                left: contexts
+                    .get(&left_normalized)
+                    .map(|summary| summary.label.clone())
+                    .unwrap_or(left_normalized),
+                right: contexts
+                    .get(&right_normalized)
+                    .map(|summary| summary.label.clone())
+                    .unwrap_or(right_normalized),
+                use_count,
+            })
+            .collect::<Vec<_>>();
+
+        text_context_relationships.sort_by(|left, right| {
+            right
+                .use_count
+                .cmp(&left.use_count)
+                .then_with(|| left.left.cmp(&right.left))
+                .then_with(|| left.right.cmp(&right.right))
+        });
+
+        Ok(TextContextSuggestionData {
+            known_text_contexts,
+            text_context_relationships,
+        })
+    }
+
+    pub async fn list_known_text_contexts(&self) -> Result<Vec<KnownTextContext>, String> {
+        self.list_text_context_suggestion_data()
+            .await
+            .map(|data| data.known_text_contexts)
+    }
+
+    pub async fn list_text_context_relationships(&self) -> Result<Vec<TextContextRelationship>, String> {
+        self.list_text_context_suggestion_data()
+            .await
+            .map(|data| data.text_context_relationships)
+    }
+
     pub async fn export_notes_markdown(&self, note_ids: Vec<String>) -> Result<String, String> {
         if note_ids.is_empty() {
             return Err("at least one note must be selected".into());
@@ -251,6 +370,18 @@ impl NoteRepository {
         }
 
         Ok(rendered_notes.join("\n\n---\n\n"))
+    }
+
+    async fn load_text_context_rows(&self) -> Result<Vec<TextContextRow>, String> {
+        sqlx::query_as::<_, TextContextRow>(
+            "SELECT note_id, text_value
+             FROM capture_contexts
+             WHERE context_type = 'text'
+             ORDER BY created_at ASC, id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| err.to_string())
     }
 }
 
@@ -309,6 +440,18 @@ struct ExportNoteRow {
     body: String,
 }
 
+#[derive(sqlx::FromRow)]
+struct TextContextRow {
+    note_id: String,
+    text_value: Option<String>,
+}
+
+struct KnownTextContextSummary {
+    label: String,
+    normalized_label: String,
+    use_count: i64,
+}
+
 fn render_export_note(body: String, capture_contexts: Vec<CaptureContextRow>) -> String {
     if capture_contexts.is_empty() {
         return body;
@@ -337,6 +480,15 @@ fn export_context_label(context: CaptureContextRow) -> String {
         ),
         _ => "- context".to_string(),
     }
+}
+
+fn normalized_text_label(value: Option<&str>) -> Option<(String, String)> {
+    let trimmed = value?.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    Some((trimmed.to_string(), trimmed.to_lowercase()))
 }
 
 async fn persist_capture_context(
@@ -640,6 +792,93 @@ mod tests {
             markdown,
             "Context:\n- older context\n\nOlder edited later\n\n---\n\nContext:\n- newer context\n\nNewer original"
         );
+    }
+
+    #[tokio::test]
+    async fn lists_deduplicated_text_contexts_with_use_counts() {
+        let repo = test_repo().await;
+        repo.save_note(SaveNoteInput {
+            note_id: None,
+            body: "One".into(),
+            capture_contexts: vec![
+                CaptureContextInput::Text {
+                    text: "cryptography".into(),
+                },
+                CaptureContextInput::Text {
+                    text: "number theory".into(),
+                },
+            ],
+            request_analysis: false,
+        })
+        .await
+        .unwrap();
+        repo.save_note(SaveNoteInput {
+            note_id: None,
+            body: "Two".into(),
+            capture_contexts: vec![
+                CaptureContextInput::Text {
+                    text: "Cryptography ".into(),
+                },
+                CaptureContextInput::Text {
+                    text: "geometry".into(),
+                },
+            ],
+            request_analysis: false,
+        })
+        .await
+        .unwrap();
+
+        let contexts = repo.list_known_text_contexts().await.unwrap();
+
+        assert_eq!(contexts[0].label, "cryptography");
+        assert_eq!(contexts[0].normalized_label, "cryptography");
+        assert_eq!(contexts[0].use_count, 2);
+    }
+
+    #[tokio::test]
+    async fn lists_text_context_relationships_from_unique_labels_per_note() {
+        let repo = test_repo().await;
+        repo.save_note(SaveNoteInput {
+            note_id: None,
+            body: "One".into(),
+            capture_contexts: vec![
+                CaptureContextInput::Text {
+                    text: "cryptography".into(),
+                },
+                CaptureContextInput::Text {
+                    text: "number theory".into(),
+                },
+                CaptureContextInput::Text {
+                    text: "cryptography".into(),
+                },
+            ],
+            request_analysis: false,
+        })
+        .await
+        .unwrap();
+        repo.save_note(SaveNoteInput {
+            note_id: None,
+            body: "Two".into(),
+            capture_contexts: vec![
+                CaptureContextInput::Text {
+                    text: "number theory".into(),
+                },
+                CaptureContextInput::Text {
+                    text: "cryptography".into(),
+                },
+            ],
+            request_analysis: false,
+        })
+        .await
+        .unwrap();
+
+        let relationships = repo.list_text_context_relationships().await.unwrap();
+
+        assert!(relationships.iter().any(|relationship| {
+            relationship.left == "cryptography"
+                && relationship.right == "number theory"
+                && relationship.use_count == 2
+        }));
     }
 
     async fn test_repo() -> NoteRepository {

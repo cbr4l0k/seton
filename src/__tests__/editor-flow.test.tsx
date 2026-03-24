@@ -30,6 +30,8 @@ function makeWorkspacePayload() {
       },
     ],
     placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
   };
 }
 
@@ -91,7 +93,12 @@ beforeEach(() => {
 });
 
 test("draft supports text, url, and image capture contexts", async () => {
-  mockBootstrapWorkspace.mockResolvedValue({ history: [], placeholders: [] });
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
   mockPickImageFile.mockResolvedValue("/tmp/context.png");
 
   render(<App />);
@@ -115,7 +122,12 @@ test("draft supports text, url, and image capture contexts", async () => {
 });
 
 test("duplicate contexts are ignored", async () => {
-  mockBootstrapWorkspace.mockResolvedValue({ history: [], placeholders: [] });
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
 
   render(<App />);
 
@@ -132,7 +144,12 @@ test("duplicate contexts are ignored", async () => {
 });
 
 test("saving a new note clears the body and preserves contexts for the next note", async () => {
-  mockBootstrapWorkspace.mockResolvedValue({ history: [], placeholders: [] });
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
   mockSaveNote.mockResolvedValue({
     ...makeSavedNoteDetail(),
     body: "A note",
@@ -196,6 +213,8 @@ test("selected notes can be exported as markdown", async () => {
       },
     ],
     placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
   });
   mockExportNotesMarkdown.mockResolvedValue(undefined);
 
@@ -203,9 +222,301 @@ test("selected notes can be exported as markdown", async () => {
 
   expect(await screen.findByText("Older note")).toBeInTheDocument();
 
+  fireEvent.keyDown(window, { key: "ArrowDown" });
   fireEvent.click(screen.getByLabelText("Select Older note"));
   fireEvent.click(screen.getByLabelText("Select Newer note"));
   fireEvent.click(screen.getByRole("button", { name: "Export selected" }));
 
   expect(mockExportNotesMarkdown).toHaveBeenCalledWith(["older-note", "newer-note"]);
+});
+
+test("ArrowRight advances to the next suggestion in the belt", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [
+      { label: "cryptography", normalizedLabel: "cryptography", useCount: 2 },
+      { label: "cryptoanalysis", normalizedLabel: "cryptoanalysis", useCount: 1 },
+    ],
+    textContextRelationships: [],
+  });
+
+  render(<App />);
+
+  fireEvent.change(screen.getByLabelText("Context input"), {
+    target: { value: "crypto" },
+  });
+
+  const firstSuggestion = await screen.findByRole("button", { name: "Suggest cryptography" });
+  const secondSuggestion = await screen.findByRole("button", { name: "Suggest cryptoanalysis" });
+  expect(firstSuggestion).toHaveAttribute("data-active", "true");
+
+  fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "ArrowRight" });
+
+  expect(secondSuggestion).toHaveAttribute("data-active", "true");
+});
+
+test("the active suggestion stays in the left slot while neighbors rotate", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [
+      { label: "cryptography", normalizedLabel: "cryptography", useCount: 5 },
+      { label: "cryptoanalysis", normalizedLabel: "cryptoanalysis", useCount: 4 },
+      { label: "cryptology", normalizedLabel: "cryptology", useCount: 3 },
+      { label: "cryptonym", normalizedLabel: "cryptonym", useCount: 2 },
+      { label: "encryption", normalizedLabel: "encryption", useCount: 1 },
+    ],
+    textContextRelationships: [],
+  });
+
+  render(<App />);
+
+  fireEvent.change(screen.getByLabelText("Context input"), {
+    target: { value: "crypto" },
+  });
+
+  await screen.findByRole("button", { name: "Suggest cryptography" });
+  expect(readSuggestionLabels()).toEqual([
+    "cryptography",
+    "cryptoanalysis",
+    "cryptology",
+    "cryptonym",
+    "encryption",
+  ]);
+  expect(readActiveSuggestionLabel()).toBe("cryptography");
+
+  fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "ArrowRight" });
+
+  expect(readSuggestionLabels()).toEqual([
+    "cryptoanalysis",
+    "cryptology",
+    "cryptonym",
+    "encryption",
+    "cryptography",
+  ]);
+  expect(readActiveSuggestionLabel()).toBe("cryptoanalysis");
+});
+
+test("ArrowLeft wraps from the first suggestion to the last", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [
+      { label: "cryptography", normalizedLabel: "cryptography", useCount: 2 },
+      { label: "cryptoanalysis", normalizedLabel: "cryptoanalysis", useCount: 1 },
+    ],
+    textContextRelationships: [],
+  });
+
+  render(<App />);
+
+  fireEvent.change(screen.getByLabelText("Context input"), {
+    target: { value: "crypto" },
+  });
+
+  const secondSuggestion = await screen.findByRole("button", { name: "Suggest cryptoanalysis" });
+  fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "ArrowLeft" });
+
+  expect(secondSuggestion).toHaveAttribute("data-active", "true");
+  expect(screen.getByLabelText("Concept Graph panel")).toHaveAttribute("data-active", "false");
+});
+
+test("typing shows fuzzy text-context suggestions from prior labels", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [
+      { label: "cryptography", normalizedLabel: "cryptography", useCount: 2 },
+      { label: "number theory", normalizedLabel: "number theory", useCount: 1 },
+    ],
+    textContextRelationships: [],
+  });
+
+  render(<App />);
+
+  fireEvent.change(screen.getByLabelText("Context input"), {
+    target: { value: "crypto" },
+  });
+
+  expect(await screen.findByRole("button", { name: "Suggest cryptography" })).toBeInTheDocument();
+});
+
+test("selected text labels boost related recommendations and exclude already selected labels", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [
+      { label: "cryptography", normalizedLabel: "cryptography", useCount: 3 },
+      { label: "number theory", normalizedLabel: "number theory", useCount: 3 },
+      { label: "elliptic curves", normalizedLabel: "elliptic curves", useCount: 1 },
+    ],
+    textContextRelationships: [
+      { left: "cryptography", right: "number theory", useCount: 3 },
+      { left: "cryptography", right: "elliptic curves", useCount: 1 },
+    ],
+  });
+
+  render(<App />);
+
+  fireEvent.change(screen.getByLabelText("Context input"), {
+    target: { value: "cryptography" },
+  });
+  fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "Enter" });
+  fireEvent.change(screen.getByLabelText("Context input"), {
+    target: { value: "num" },
+  });
+
+  const suggestions = await screen.findAllByRole("button", { name: /Suggest / });
+  expect(suggestions[0]).toHaveTextContent("number theory");
+  expect(screen.queryByRole("button", { name: "Suggest cryptography" })).not.toBeInTheDocument();
+});
+
+test("pressing enter commits the active suggestion before the raw draft", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [{ label: "cryptography", normalizedLabel: "cryptography", useCount: 2 }],
+    textContextRelationships: [],
+  });
+
+  render(<App />);
+
+  fireEvent.change(screen.getByLabelText("Context input"), {
+    target: { value: "crypto" },
+  });
+  expect(await screen.findByRole("button", { name: "Suggest cryptography" })).toBeInTheDocument();
+  fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "Enter" });
+
+  expect(await screen.findByText("cryptography")).toBeInTheDocument();
+  expect(screen.queryByText("crypto")).not.toBeInTheDocument();
+});
+
+test("left and right move the active suggestion and enter commits that selection", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [
+      { label: "cryptography", normalizedLabel: "cryptography", useCount: 2 },
+      { label: "cryptoanalysis", normalizedLabel: "cryptoanalysis", useCount: 1 },
+    ],
+    textContextRelationships: [],
+  });
+
+  render(<App />);
+
+  fireEvent.change(screen.getByLabelText("Context input"), {
+    target: { value: "crypto" },
+  });
+
+  const firstSuggestion = await screen.findByRole("button", { name: "Suggest cryptography" });
+  const secondSuggestion = await screen.findByRole("button", { name: "Suggest cryptoanalysis" });
+
+  expect(firstSuggestion).toHaveAttribute("data-active", "true");
+  fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "ArrowRight" });
+  expect(secondSuggestion).toHaveAttribute("data-active", "true");
+
+  fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "Enter" });
+
+  expect(await screen.findByText("cryptoanalysis")).toBeInTheDocument();
+  expect(screen.queryByText("cryptography")).not.toBeInTheDocument();
+});
+
+function readSuggestionLabels() {
+  return screen
+    .getAllByRole("button", { name: /Suggest / })
+    .map((button) => button.textContent?.trim() ?? "");
+}
+
+function readActiveSuggestionLabel() {
+  return (
+    screen
+      .getAllByRole("button", { name: /Suggest / })
+      .find((button) => button.getAttribute("data-active") === "true")
+      ?.textContent?.trim() ?? null
+  );
+}
+
+test("clicking a suggestion commits it immediately", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [{ label: "cryptography", normalizedLabel: "cryptography", useCount: 2 }],
+    textContextRelationships: [],
+  });
+
+  render(<App />);
+
+  fireEvent.change(screen.getByLabelText("Context input"), {
+    target: { value: "crypto" },
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Suggest cryptography" }));
+
+  expect(await screen.findByText("cryptography")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Suggest cryptography" })).not.toBeInTheDocument();
+});
+
+test("newly saved text labels become available as suggestions for the next draft", async () => {
+  mockBootstrapWorkspace
+    .mockResolvedValueOnce({
+      history: [],
+      placeholders: [],
+      knownTextContexts: [],
+      textContextRelationships: [],
+    })
+    .mockResolvedValueOnce({
+      history: [
+        {
+          id: "seed-note",
+          preview: "A note",
+          lastOpenedAt: null,
+          updatedAt: "2026-03-21T11:00:00Z",
+        },
+      ],
+      placeholders: [],
+      knownTextContexts: [
+        { label: "cryptography", normalizedLabel: "cryptography", useCount: 1 },
+      ],
+      textContextRelationships: [],
+    });
+  mockSaveNote.mockResolvedValue({
+    ...makeSavedNoteDetail(),
+    body: "A note",
+    updatedAt: "2026-03-21T11:00:00Z",
+    captureContexts: [
+      {
+        id: "ctx-1",
+        kind: "text" as const,
+        textValue: "cryptography",
+        urlValue: null,
+        sourcePath: null,
+        managedPath: null,
+      },
+    ],
+  });
+
+  render(<App />);
+
+  fireEvent.change(screen.getByPlaceholderText("I'm thinking about..."), {
+    target: { value: "A note" },
+  });
+  fireEvent.change(screen.getByLabelText("Context input"), {
+    target: { value: "cryptography" },
+  });
+  fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "Enter" });
+  fireEvent.keyDown(screen.getByPlaceholderText("I'm thinking about..."), {
+    key: "Enter",
+    ctrlKey: true,
+  });
+
+  await waitFor(() => {
+    expect(screen.getByPlaceholderText("I'm thinking about...")).toHaveValue("");
+  });
+
+  fireEvent.click(screen.getByText("cryptography"));
+  fireEvent.change(screen.getByLabelText("Context input"), {
+    target: { value: "crypto" },
+  });
+
+  expect(await screen.findByRole("button", { name: "Suggest cryptography" })).toBeInTheDocument();
 });

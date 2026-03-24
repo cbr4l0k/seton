@@ -5,7 +5,12 @@ import departureMonoFontUrl from "../assets/fonts/DepartureMono-Regular.woff2?ur
 import { bootstrapWorkspace } from "../lib/tauri";
 
 vi.mock("../lib/tauri", () => ({
-  bootstrapWorkspace: vi.fn().mockResolvedValue({ history: [], placeholders: [] }),
+  bootstrapWorkspace: vi.fn().mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  }),
   deleteNote: vi.fn(),
   saveNote: vi.fn(),
   openNote: vi.fn(),
@@ -13,7 +18,12 @@ vi.mock("../lib/tauri", () => ({
 }));
 
 beforeEach(() => {
-  vi.mocked(bootstrapWorkspace).mockResolvedValue({ history: [], placeholders: [] });
+  vi.mocked(bootstrapWorkspace).mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
 });
 
 test("renders the Thought Inbox shell", () => {
@@ -91,6 +101,8 @@ test("bottom notes panel provides a focusable scroll region when notes overflow"
       updatedAt: `2026-03-${String(index + 1).padStart(2, "0")}`,
     })),
     placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
   });
 
   render(<App />);
@@ -102,4 +114,42 @@ test("bottom notes panel provides a focusable scroll region when notes overflow"
   expect(notesPanel).toHaveAttribute("data-active", "true");
   expect(notesPanel).toHaveAttribute("data-size", "capped");
   expect(scrollRegion).toHaveAttribute("tabindex", "0");
+});
+
+test("inactive notes panel controls are removed from the tab order", async () => {
+  vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
+    history: [
+      {
+        id: "note-1",
+        preview: "Focusable note",
+        lastOpenedAt: null,
+        updatedAt: "2026-03-24",
+      },
+    ],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
+
+  render(<App />);
+  await screen.findByText("Focusable note");
+
+  const notesPanel = screen.getByLabelText("Notes panel");
+  const exportButton = notesPanel.querySelector<HTMLButtonElement>(".history-export");
+  const scrollRegion = notesPanel.querySelector<HTMLDivElement>(".history-scroll-region");
+  const checkbox = notesPanel.querySelector<HTMLInputElement>('input[aria-label="Select Focusable note"]');
+  const openButton = notesPanel.querySelector<HTMLButtonElement>(".history-item");
+  const deleteButton = notesPanel.querySelector<HTMLButtonElement>('button[aria-label="Delete Focusable note"]');
+
+  expect(notesPanel).toHaveAttribute("data-active", "false");
+  expect(exportButton).not.toBeNull();
+  expect(scrollRegion).not.toBeNull();
+  expect(checkbox).not.toBeNull();
+  expect(openButton).not.toBeNull();
+  expect(deleteButton).not.toBeNull();
+  expect(exportButton).toBeDisabled();
+  expect(scrollRegion).toHaveAttribute("tabindex", "-1");
+  expect(checkbox).toBeDisabled();
+  expect(openButton).toBeDisabled();
+  expect(deleteButton).toBeDisabled();
 });

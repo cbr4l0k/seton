@@ -515,6 +515,36 @@ textarea {
   padding-right: 4px;
 }
 
+.capture-contexts__suggestions {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: 8px;
+  overflow: hidden;
+  padding: 2px 0 4px;
+}
+
+.capture-contexts__suggestion {
+  flex: 0 0 auto;
+  border: 1px solid rgba(22, 115, 101, 0.24);
+  background: rgba(22, 115, 101, 0.08);
+  color: var(--ink);
+  padding: 7px 10px;
+  font-size: 11px;
+  text-transform: lowercase;
+  cursor: pointer;
+  opacity: 0.72;
+  transform: scale(0.96);
+  transition: transform 120ms ease, opacity 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.capture-contexts__suggestion[data-active="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  opacity: 1;
+  transform: scale(1);
+}
+
 .context-chip {
   border: 1px solid var(--line);
   padding: 8px 12px;

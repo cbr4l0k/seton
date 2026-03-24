@@ -1,4 +1,5 @@
 import type { RefObject } from "react";
+import type { KnownTextContext, TextContextRelationship } from "../lib/types";
 
 import {
   CaptureContextEditor,
@@ -10,6 +11,8 @@ type CenterEditorPanelProps = {
   onBodyChange: (value: string) => void;
   contexts: DraftCaptureContext[];
   onContextsChange: (contexts: DraftCaptureContext[]) => void;
+  knownTextContexts: KnownTextContext[];
+  textContextRelationships: TextContextRelationship[];
   active: boolean;
   editorRef: RefObject<HTMLTextAreaElement>;
 };
@@ -19,6 +22,8 @@ export function CenterEditorPanel({
   onBodyChange,
   contexts,
   onContextsChange,
+  knownTextContexts,
+  textContextRelationships,
   active,
   editorRef,
 }: CenterEditorPanelProps) {
@@ -71,7 +76,13 @@ export function CenterEditorPanel({
         onPaste={handlePaste}
       />
 
-      <CaptureContextEditor active={active} contexts={contexts} onChange={onContextsChange} />
+      <CaptureContextEditor
+        active={active}
+        contexts={contexts}
+        knownTextContexts={knownTextContexts}
+        onChange={onContextsChange}
+        textContextRelationships={textContextRelationships}
+      />
     </section>
   );
 }

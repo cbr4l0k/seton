@@ -11,6 +11,18 @@ export type RecentNote = {
   updatedAt: string;
 };
 
+export type KnownTextContext = {
+  label: string;
+  normalizedLabel: string;
+  useCount: number;
+};
+
+export type TextContextRelationship = {
+  left: string;
+  right: string;
+  useCount: number;
+};
+
 export type CaptureContext =
   | {
       id: string;
@@ -64,4 +76,6 @@ export type SaveNoteRequest = {
 export type WorkspacePayload = {
   history: RecentNote[];
   placeholders: PlaceholderPanel[];
+  knownTextContexts: KnownTextContext[];
+  textContextRelationships: TextContextRelationship[];
 };

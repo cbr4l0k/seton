@@ -27,6 +27,7 @@ export function HistoryPanel({
 
   return (
     <section
+      aria-hidden={!active}
       aria-label="Notes panel"
       className="panel panel-bottom"
       data-active={active}
@@ -37,14 +38,14 @@ export function HistoryPanel({
         <button
           className="history-export"
           type="button"
-          disabled={selected.size === 0}
+          disabled={!active || selected.size === 0}
           onClick={onExport}
         >
           Export selected
         </button>
       </div>
       {items.length > 0 ? (
-        <div aria-label="Notes list" className="history-scroll-region" tabIndex={0}>
+        <div aria-label="Notes list" className="history-scroll-region" tabIndex={active ? 0 : -1}>
           <ul className="history-list">
             {items.map((item) => (
               <li key={item.id}>
@@ -53,17 +54,24 @@ export function HistoryPanel({
                     <input
                       aria-label={`Select ${item.preview}`}
                       checked={selected.has(item.id)}
+                      disabled={!active}
                       type="checkbox"
                       onChange={(event) => onSelectionChange(item.id, event.target.checked)}
                     />
                   </label>
-                  <button className="history-item" type="button" onClick={() => onOpen(item.id)}>
+                  <button
+                    className="history-item"
+                    disabled={!active}
+                    type="button"
+                    onClick={() => onOpen(item.id)}
+                  >
                     <span>{item.preview}</span>
                     <time>{item.updatedAt}</time>
                   </button>
                   <button
                     aria-label={`Delete ${item.preview}`}
                     className="history-delete"
+                    disabled={!active}
                     type="button"
                     onClick={() => onDelete(item.id)}
                   >

@@ -8,7 +8,13 @@ import { WorkspaceCanvas } from "./components/WorkspaceCanvas";
 import { useSpatialNavigation } from "./hooks/useSpatialNavigation";
 import type { DraftCaptureContext } from "./components/CaptureContextEditor";
 import { bootstrapWorkspace, deleteNote, exportNotesMarkdown, openNote, saveNote } from "./lib/tauri";
-import type { CaptureContext, RecentNote, SaveNoteRequest } from "./lib/types";
+import type {
+  CaptureContext,
+  KnownTextContext,
+  RecentNote,
+  SaveNoteRequest,
+  TextContextRelationship,
+} from "./lib/types";
 
 type LoadedDraftSnapshot = {
   noteId: string | null;
@@ -22,6 +28,8 @@ export default function App() {
   const [body, setBody] = useState("");
   const [contexts, setContexts] = useState<DraftCaptureContext[]>([]);
   const [historyItems, setHistoryItems] = useState<RecentNote[]>([]);
+  const [knownTextContexts, setKnownTextContexts] = useState<KnownTextContext[]>([]);
+  const [textContextRelationships, setTextContextRelationships] = useState<TextContextRelationship[]>([]);
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
   const [currentNoteId, setCurrentNoteId] = useState<string | null>(null);
   const [requestAnalysisAfterSave, setRequestAnalysisAfterSave] = useState(false);
@@ -40,21 +48,12 @@ export default function App() {
   }, [position]);
 
   useEffect(() => {
-    let cancelled = false;
+    const cancellation = { current: false };
 
-    void bootstrapWorkspace().then((payload) => {
-      if (cancelled) {
-        return;
-      }
-      setHistoryItems(payload.history);
-    }).catch(() => {
-      if (!cancelled) {
-        setHistoryItems([]);
-      }
-    });
+    void loadWorkspaceData(() => cancellation.current);
 
     return () => {
-      cancelled = true;
+      cancellation.current = true;
     };
   }, []);
 
@@ -135,8 +134,30 @@ export default function App() {
     setBody("");
     setContexts(preservedContexts);
     syncLoadedSnapshot(null, "", preservedContexts);
+    await loadWorkspaceData();
     setToastMessage("saved");
     setPosition("center");
+  }
+
+  async function loadWorkspaceData(isCancelled: () => boolean = () => false) {
+    try {
+      const payload = await bootstrapWorkspace();
+      if (isCancelled()) {
+        return;
+      }
+
+      setHistoryItems(payload.history);
+      setKnownTextContexts(payload.knownTextContexts ?? []);
+      setTextContextRelationships(payload.textContextRelationships ?? []);
+    } catch {
+      if (isCancelled()) {
+        return;
+      }
+
+      setHistoryItems([]);
+      setKnownTextContexts([]);
+      setTextContextRelationships([]);
+    }
   }
 
   async function attemptSave() {
@@ -241,8 +262,10 @@ export default function App() {
         body={body}
         contexts={contexts}
         editorRef={editorRef}
+        knownTextContexts={knownTextContexts}
         onBodyChange={setBody}
         onContextsChange={setContexts}
+        textContextRelationships={textContextRelationships}
       />
 
       <PlaceholderPanel

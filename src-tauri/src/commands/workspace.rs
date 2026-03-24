@@ -2,7 +2,9 @@ use serde::Serialize;
 use tokio::fs;
 
 use crate::app_state::AppState;
-use crate::db::repository::SaveNoteInput;
+use crate::db::repository::{
+    KnownTextContext, SaveNoteInput, TextContextRelationship, TextContextSuggestionData,
+};
 use crate::domain::capture_context::{CaptureContext, CaptureContextInput};
 use crate::domain::note::{NoteDetail, RecentNote};
 
@@ -11,6 +13,8 @@ use crate::domain::note::{NoteDetail, RecentNote};
 pub struct WorkspacePayload {
     pub history: Vec<RecentNoteDto>,
     pub placeholders: Vec<PlaceholderPanelDto>,
+    pub known_text_contexts: Vec<KnownTextContextDto>,
+    pub text_context_relationships: Vec<TextContextRelationshipDto>,
 }
 
 #[derive(Clone, Serialize)]
@@ -53,6 +57,22 @@ pub struct CaptureContextDto {
     pub url_value: Option<String>,
     pub source_path: Option<String>,
     pub managed_path: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnownTextContextDto {
+    pub label: String,
+    pub normalized_label: String,
+    pub use_count: i64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextContextRelationshipDto {
+    pub left: String,
+    pub right: String,
+    pub use_count: i64,
 }
 
 #[derive(Clone, serde::Deserialize)]
@@ -114,10 +134,22 @@ pub async fn export_notes_markdown(
 
 pub async fn bootstrap_workspace_with_state(state: &AppState) -> Result<WorkspacePayload, String> {
     let history = state.repository.list_recent_notes(12).await?;
+    let TextContextSuggestionData {
+        known_text_contexts,
+        text_context_relationships,
+    } = state.repository.list_text_context_suggestion_data().await?;
 
     Ok(WorkspacePayload {
         history: history.into_iter().map(RecentNoteDto::from).collect(),
         placeholders: placeholder_panels(),
+        known_text_contexts: known_text_contexts
+            .into_iter()
+            .map(KnownTextContextDto::from)
+            .collect(),
+        text_context_relationships: text_context_relationships
+            .into_iter()
+            .map(TextContextRelationshipDto::from)
+            .collect(),
     })
 }
 
@@ -232,6 +264,26 @@ impl From<CaptureContextRequest> for CaptureContextInput {
     }
 }
 
+impl From<KnownTextContext> for KnownTextContextDto {
+    fn from(value: KnownTextContext) -> Self {
+        Self {
+            label: value.label,
+            normalized_label: value.normalized_label,
+            use_count: value.use_count,
+        }
+    }
+}
+
+impl From<TextContextRelationship> for TextContextRelationshipDto {
+    fn from(value: TextContextRelationship) -> Self {
+        Self {
+            left: value.left,
+            right: value.right,
+            use_count: value.use_count,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::TempDir;
@@ -252,6 +304,37 @@ mod tests {
         assert_eq!(payload.history[0].preview, "Seed note");
     }
 
+    #[tokio::test]
+    async fn bootstrap_workspace_returns_known_text_contexts() {
+        let state = seeded_state_with_text_contexts().await;
+        let payload = bootstrap_workspace_with_state(&state).await.unwrap();
+
+        assert_eq!(payload.known_text_contexts.len(), 3);
+        assert_eq!(payload.known_text_contexts[0].label, "cryptography");
+        assert_eq!(payload.known_text_contexts[0].use_count, 2);
+    }
+
+    #[tokio::test]
+    async fn bootstrap_workspace_excludes_url_and_image_contexts_from_known_text_contexts() {
+        let state = seeded_state_with_mixed_contexts().await;
+        let payload = bootstrap_workspace_with_state(&state).await.unwrap();
+
+        assert!(payload
+            .known_text_contexts
+            .iter()
+            .all(|item| item.label != "https://example.com" && item.label != "image.png"));
+    }
+
+    #[tokio::test]
+    async fn bootstrap_workspace_returns_text_context_relationships() {
+        let state = seeded_state_with_related_text_contexts().await;
+        let payload = bootstrap_workspace_with_state(&state).await.unwrap();
+
+        assert!(payload.text_context_relationships.iter().any(|pair| {
+            pair.left == "cryptography" && pair.right == "number theory" && pair.use_count == 2
+        }));
+    }
+
     async fn seeded_state_with_recent_note() -> AppState {
         let temp = TempDir::new().unwrap();
         let root = temp.keep();
@@ -268,6 +351,161 @@ mod tests {
                 capture_contexts: vec![CaptureContextInput::Text {
                     text: "Seed context".into(),
                 }],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+
+        state
+    }
+
+    fn fixture_png_path() -> String {
+        let temp = TempDir::new().unwrap();
+        let root = temp.keep();
+        let path = root.join("fixture.png");
+
+        std::fs::write(
+            &path,
+            [
+                137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0,
+                1, 8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99,
+                248, 15, 4, 0, 9, 251, 3, 253, 160, 77, 167, 219, 0, 0, 0, 0, 73, 69, 78, 68, 174,
+                66, 96, 130,
+            ],
+        )
+        .unwrap();
+
+        path.display().to_string()
+    }
+
+    async fn seeded_state_with_text_contexts() -> AppState {
+        let temp = TempDir::new().unwrap();
+        let root = temp.keep();
+        let paths = build_app_paths(&root);
+        std::fs::create_dir_all(&paths.images_dir).unwrap();
+        let pool = connect(&paths).await.unwrap();
+        let state = AppState::from_parts(paths, pool);
+
+        state
+            .repository
+            .save_note(SaveNoteInput {
+                note_id: None,
+                body: "First note".into(),
+                capture_contexts: vec![
+                    CaptureContextInput::Text {
+                        text: "cryptography".into(),
+                    },
+                    CaptureContextInput::Text {
+                        text: "number theory".into(),
+                    },
+                ],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+        state
+            .repository
+            .save_note(SaveNoteInput {
+                note_id: None,
+                body: "Second note".into(),
+                capture_contexts: vec![
+                    CaptureContextInput::Text {
+                        text: "cryptography".into(),
+                    },
+                    CaptureContextInput::Text {
+                        text: "geometry".into(),
+                    },
+                ],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+        state
+            .repository
+            .save_note(SaveNoteInput {
+                note_id: None,
+                body: "Third note".into(),
+                capture_contexts: vec![CaptureContextInput::Text {
+                    text: "number theory".into(),
+                }],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+
+        state
+    }
+
+    async fn seeded_state_with_mixed_contexts() -> AppState {
+        let temp = TempDir::new().unwrap();
+        let root = temp.keep();
+        let paths = build_app_paths(&root);
+        std::fs::create_dir_all(&paths.images_dir).unwrap();
+        let pool = connect(&paths).await.unwrap();
+        let state = AppState::from_parts(paths, pool);
+
+        state
+            .repository
+            .save_note(SaveNoteInput {
+                note_id: None,
+                body: "Mixed note".into(),
+                capture_contexts: vec![
+                    CaptureContextInput::Text {
+                        text: "cryptography".into(),
+                    },
+                    CaptureContextInput::Url {
+                        url: "https://example.com".into(),
+                    },
+                    CaptureContextInput::Image {
+                        source_path: fixture_png_path(),
+                    },
+                ],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+
+        state
+    }
+
+    async fn seeded_state_with_related_text_contexts() -> AppState {
+        let temp = TempDir::new().unwrap();
+        let root = temp.keep();
+        let paths = build_app_paths(&root);
+        std::fs::create_dir_all(&paths.images_dir).unwrap();
+        let pool = connect(&paths).await.unwrap();
+        let state = AppState::from_parts(paths, pool);
+
+        state
+            .repository
+            .save_note(SaveNoteInput {
+                note_id: None,
+                body: "Related note one".into(),
+                capture_contexts: vec![
+                    CaptureContextInput::Text {
+                        text: "cryptography".into(),
+                    },
+                    CaptureContextInput::Text {
+                        text: "number theory".into(),
+                    },
+                ],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+        state
+            .repository
+            .save_note(SaveNoteInput {
+                note_id: None,
+                body: "Related note two".into(),
+                capture_contexts: vec![
+                    CaptureContextInput::Text {
+                        text: "number theory".into(),
+                    },
+                    CaptureContextInput::Text {
+                        text: "cryptography".into(),
+                    },
+                ],
                 request_analysis: false,
             })
             .await
