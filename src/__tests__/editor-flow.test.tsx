@@ -270,7 +270,7 @@ test("bootstrap history timestamps are displayed as dd.mm.yyyy", async () => {
   expect(await screen.findByText("24.03.2026")).toBeInTheDocument();
 });
 
-test("ArrowRight advances to the next suggestion in the belt", async () => {
+test("ArrowRight advances from the create entry to the first suggestion, then to the next", async () => {
   mockBootstrapWorkspace.mockResolvedValue({
     history: [],
     placeholders: [],
@@ -289,10 +289,15 @@ test("ArrowRight advances to the next suggestion in the belt", async () => {
 
   const firstSuggestion = await screen.findByRole("button", { name: "Suggest cryptography" });
   const secondSuggestion = await screen.findByRole("button", { name: "Suggest cryptoanalysis" });
+  expect(screen.getByRole("button", { name: "Create context: crypto" })).toHaveAttribute(
+    "data-active",
+    "true",
+  );
+
+  fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "ArrowRight" });
   expect(firstSuggestion).toHaveAttribute("data-active", "true");
 
   fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "ArrowRight" });
-
   expect(secondSuggestion).toHaveAttribute("data-active", "true");
 });
 
@@ -317,6 +322,18 @@ test("the active suggestion stays in the left slot while neighbors rotate", asyn
   });
 
   await screen.findByRole("button", { name: "Suggest cryptography" });
+  // Create entry is default active; suggestions appear in natural order.
+  expect(readSuggestionLabels()).toEqual([
+    "cryptography",
+    "cryptoanalysis",
+    "cryptology",
+    "cryptonym",
+    "encryption",
+  ]);
+  expect(readActiveSuggestionLabel()).toBe(null);
+
+  // Move to first suggestion.
+  fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "ArrowRight" });
   expect(readSuggestionLabels()).toEqual([
     "cryptography",
     "cryptoanalysis",
@@ -326,8 +343,8 @@ test("the active suggestion stays in the left slot while neighbors rotate", asyn
   ]);
   expect(readActiveSuggestionLabel()).toBe("cryptography");
 
+  // Move to second suggestion — belt rotates to keep it in the left slot.
   fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "ArrowRight" });
-
   expect(readSuggestionLabels()).toEqual([
     "cryptoanalysis",
     "cryptology",
@@ -338,7 +355,7 @@ test("the active suggestion stays in the left slot while neighbors rotate", asyn
   expect(readActiveSuggestionLabel()).toBe("cryptoanalysis");
 });
 
-test("ArrowLeft wraps from the first suggestion to the last", async () => {
+test("ArrowLeft wraps from the create entry to the last suggestion", async () => {
   mockBootstrapWorkspace.mockResolvedValue({
     history: [],
     placeholders: [],
@@ -356,6 +373,7 @@ test("ArrowLeft wraps from the first suggestion to the last", async () => {
   });
 
   const secondSuggestion = await screen.findByRole("button", { name: "Suggest cryptoanalysis" });
+  // Create entry is default active; ArrowLeft wraps to the last suggestion.
   fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "ArrowLeft" });
 
   expect(secondSuggestion).toHaveAttribute("data-active", "true");
@@ -412,7 +430,7 @@ test("selected text labels boost related recommendations and exclude already sel
   expect(screen.queryByRole("button", { name: "Suggest cryptography" })).not.toBeInTheDocument();
 });
 
-test("pressing enter commits the active suggestion before the raw draft", async () => {
+test("pressing enter on a navigated suggestion commits it instead of the raw draft", async () => {
   mockBootstrapWorkspace.mockResolvedValue({
     history: [],
     placeholders: [],
@@ -425,7 +443,9 @@ test("pressing enter commits the active suggestion before the raw draft", async 
   fireEvent.change(screen.getByLabelText("Context input"), {
     target: { value: "crypto" },
   });
-  expect(await screen.findByRole("button", { name: "Suggest cryptography" })).toBeInTheDocument();
+  await screen.findByRole("button", { name: "Suggest cryptography" });
+  // Navigate past the create entry to the matched suggestion.
+  fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "ArrowRight" });
   fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "Enter" });
 
   expect(await screen.findByText("cryptography")).toBeInTheDocument();
@@ -452,6 +472,8 @@ test("left and right move the active suggestion and enter commits that selection
   const firstSuggestion = await screen.findByRole("button", { name: "Suggest cryptography" });
   const secondSuggestion = await screen.findByRole("button", { name: "Suggest cryptoanalysis" });
 
+  // Create entry is default active; navigate right twice to reach the second suggestion.
+  fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "ArrowRight" });
   expect(firstSuggestion).toHaveAttribute("data-active", "true");
   fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "ArrowRight" });
   expect(secondSuggestion).toHaveAttribute("data-active", "true");
@@ -460,6 +482,135 @@ test("left and right move the active suggestion and enter commits that selection
 
   expect(await screen.findByText("cryptoanalysis")).toBeInTheDocument();
   expect(screen.queryByText("cryptography")).not.toBeInTheDocument();
+});
+
+test("create entry appears first and is active by default when input has text", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [{ label: "cryptography", normalizedLabel: "cryptography", useCount: 1 }],
+    textContextRelationships: [],
+  });
+
+  render(<App />);
+
+  fireEvent.change(screen.getByLabelText("Context input"), {
+    target: { value: "crypto" },
+  });
+
+  await screen.findByRole("button", { name: "Suggest cryptography" });
+  expect(screen.getByRole("button", { name: "Create context: crypto" })).toHaveAttribute(
+    "data-active",
+    "true",
+  );
+});
+
+test("create entry updates in real time as the user types", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
+
+  render(<App />);
+
+  fireEvent.change(screen.getByLabelText("Context input"), { target: { value: "new topic" } });
+  expect(await screen.findByRole("button", { name: "Create context: new topic" })).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Context input"), { target: { value: "new topic 2" } });
+  expect(screen.getByRole("button", { name: "Create context: new topic 2" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Create context: new topic" })).not.toBeInTheDocument();
+});
+
+test("clicking create entry adds a new context with the typed label", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
+
+  render(<App />);
+
+  fireEvent.change(screen.getByLabelText("Context input"), { target: { value: "brand new" } });
+  fireEvent.click(await screen.findByRole("button", { name: "Create context: brand new" }));
+
+  expect(await screen.findByText("brand new")).toBeInTheDocument();
+});
+
+test("create entry is present even when typed value exactly matches an existing context", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [{ label: "cryptography", normalizedLabel: "cryptography", useCount: 1 }],
+    textContextRelationships: [],
+  });
+
+  render(<App />);
+
+  fireEvent.change(screen.getByLabelText("Context input"), { target: { value: "cryptography" } });
+
+  await screen.findByRole("button", { name: "Suggest cryptography" });
+  expect(screen.getByRole("button", { name: "Create context: cryptography" })).toBeInTheDocument();
+});
+
+test("ArrowRight wraps from the last suggestion back to the create entry", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [{ label: "cryptography", normalizedLabel: "cryptography", useCount: 1 }],
+    textContextRelationships: [],
+  });
+
+  render(<App />);
+
+  fireEvent.change(screen.getByLabelText("Context input"), { target: { value: "crypto" } });
+
+  await screen.findByRole("button", { name: "Suggest cryptography" });
+  // create → cryptography → wraps back to create
+  fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "ArrowRight" });
+  fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "ArrowRight" });
+
+  expect(screen.getByRole("button", { name: "Create context: crypto" })).toHaveAttribute(
+    "data-active",
+    "true",
+  );
+});
+
+test("pressing Enter on the create entry commits the raw draft", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [{ label: "cryptography", normalizedLabel: "cryptography", useCount: 1 }],
+    textContextRelationships: [],
+  });
+
+  render(<App />);
+
+  fireEvent.change(screen.getByLabelText("Context input"), { target: { value: "crypto" } });
+  // Create entry is default active — Enter immediately commits the raw draft.
+  await screen.findByRole("button", { name: "Create context: crypto" });
+  fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "Enter" });
+
+  expect(await screen.findByText("crypto")).toBeInTheDocument();
+  expect(screen.queryByText("cryptography")).not.toBeInTheDocument();
+});
+
+test("create entry appears with no matching suggestions", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
+
+  render(<App />);
+
+  fireEvent.change(screen.getByLabelText("Context input"), { target: { value: "brand new" } });
+
+  expect(await screen.findByRole("button", { name: "Create context: brand new" })).toBeInTheDocument();
+  expect(screen.queryAllByRole("button", { name: /Suggest / })).toHaveLength(0);
 });
 
 function readSuggestionLabels() {

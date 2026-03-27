@@ -19,6 +19,7 @@ type CaptureContextEditorProps = {
 
 const URL_PATTERN = /^https?:\/\/[^\s]+$/i;
 const MAX_SUGGESTIONS = 5;
+const CREATE_LABEL = "\x00create";
 
 export function CaptureContextEditor({
   active,
@@ -40,28 +41,40 @@ export function CaptureContextEditor({
         textContextRelationships,
       }).slice(0, MAX_SUGGESTIONS)
     : [];
-  const activeSuggestionIndex = suggestions.findIndex(
-    (suggestion) => suggestion.normalizedLabel === activeSuggestionLabel,
+
+  const trimmedDraft = draft.trim();
+  const showCreateEntry = active && trimmedDraft.length > 0 && !URL_PATTERN.test(trimmedDraft);
+
+  const allNavigableItems = showCreateEntry
+    ? [{ label: trimmedDraft, normalizedLabel: CREATE_LABEL, useCount: 0 }, ...suggestions]
+    : suggestions;
+
+  const activeNavIndex = allNavigableItems.findIndex(
+    (item) => item.normalizedLabel === activeSuggestionLabel,
   );
-  const resolvedActiveSuggestionIndex = activeSuggestionIndex >= 0 ? activeSuggestionIndex : 0;
-  const activeSuggestion = suggestions[resolvedActiveSuggestionIndex];
-  const renderedSuggestions = arrangeSuggestionsFromActive(suggestions, resolvedActiveSuggestionIndex);
+  const resolvedNavIndex = activeNavIndex >= 0 ? activeNavIndex : 0;
+
+  // Belt rotates all items together (create entry included).
+  const renderedBelt = arrangeSuggestionsFromActive(allNavigableItems, resolvedNavIndex);
+
+  // Undefined when create entry is active — Enter falls through to commitDraft().
+  const activeSuggestion = suggestions.find((s) => s.normalizedLabel === activeSuggestionLabel);
 
   useEffect(() => {
-    if (suggestions.length === 0) {
+    if (allNavigableItems.length === 0) {
       setActiveSuggestionLabel(null);
       return;
     }
 
     if (
       activeSuggestionLabel &&
-      suggestions.some((suggestion) => suggestion.normalizedLabel === activeSuggestionLabel)
+      allNavigableItems.some((item) => item.normalizedLabel === activeSuggestionLabel)
     ) {
       return;
     }
 
-    setActiveSuggestionLabel(suggestions[0].normalizedLabel);
-  }, [activeSuggestionLabel, suggestions]);
+    setActiveSuggestionLabel(allNavigableItems[0].normalizedLabel);
+  }, [activeSuggestionLabel, allNavigableItems]);
 
   function commitDraft() {
     commitTextOrUrlContext(draft);
@@ -139,18 +152,18 @@ export function CaptureContextEditor({
           onBlur={commitDraft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "ArrowLeft" && suggestions.length > 0) {
+            if (event.key === "ArrowLeft" && allNavigableItems.length > 0) {
               event.preventDefault();
               const nextIndex =
-                (resolvedActiveSuggestionIndex - 1 + suggestions.length) % suggestions.length;
-              setActiveSuggestionLabel(suggestions[nextIndex].normalizedLabel);
+                (resolvedNavIndex - 1 + allNavigableItems.length) % allNavigableItems.length;
+              setActiveSuggestionLabel(allNavigableItems[nextIndex].normalizedLabel);
               return;
             }
 
-            if (event.key === "ArrowRight" && suggestions.length > 0) {
+            if (event.key === "ArrowRight" && allNavigableItems.length > 0) {
               event.preventDefault();
-              const nextIndex = (resolvedActiveSuggestionIndex + 1) % suggestions.length;
-              setActiveSuggestionLabel(suggestions[nextIndex].normalizedLabel);
+              const nextIndex = (resolvedNavIndex + 1) % allNavigableItems.length;
+              setActiveSuggestionLabel(allNavigableItems[nextIndex].normalizedLabel);
               return;
             }
 
@@ -178,22 +191,37 @@ export function CaptureContextEditor({
         </button>
       </div>
 
-      {suggestions.length > 0 ? (
+      {renderedBelt.length > 0 ? (
         <div aria-label="Context suggestions" className="capture-contexts__suggestions">
-          {renderedSuggestions.map((suggestion) => (
-            <button
-              key={suggestion.normalizedLabel}
-              aria-label={`Suggest ${suggestion.label}`}
-              className="capture-contexts__suggestion"
-              data-active={suggestion.normalizedLabel === activeSuggestion?.normalizedLabel}
-              data-suggestion-label={suggestion.normalizedLabel}
-              type="button"
-              onClick={() => commitSuggestion(suggestion.label)}
-              onMouseDown={(event) => event.preventDefault()}
-            >
-              {suggestion.label}
-            </button>
-          ))}
+          {renderedBelt.map((item) =>
+            item.normalizedLabel === CREATE_LABEL ? (
+              <button
+                key={CREATE_LABEL}
+                aria-label={`Create context: ${item.label}`}
+                className="capture-contexts__suggestion capture-contexts__suggestion--create"
+                data-active={activeSuggestionLabel === CREATE_LABEL}
+                data-suggestion-label={CREATE_LABEL}
+                type="button"
+                onClick={commitDraft}
+                onMouseDown={(event) => event.preventDefault()}
+              >
+                Create: {item.label}
+              </button>
+            ) : (
+              <button
+                key={item.normalizedLabel}
+                aria-label={`Suggest ${item.label}`}
+                className="capture-contexts__suggestion"
+                data-active={item.normalizedLabel === activeSuggestion?.normalizedLabel}
+                data-suggestion-label={item.normalizedLabel}
+                type="button"
+                onClick={() => commitSuggestion(item.label)}
+                onMouseDown={(event) => event.preventDefault()}
+              >
+                {item.label}
+              </button>
+            ),
+          )}
         </div>
       ) : null}
 

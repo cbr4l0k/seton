@@ -545,6 +545,15 @@ textarea {
   transform: scale(1);
 }
 
+.capture-contexts__suggestion--create {
+  border-style: dashed;
+  opacity: 0.5;
+}
+
+.capture-contexts__suggestion--create[data-active="true"] {
+  opacity: 1;
+}
+
 .context-chip {
   border: 1px solid var(--line);
   padding: 8px 12px;
