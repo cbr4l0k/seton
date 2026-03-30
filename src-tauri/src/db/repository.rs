@@ -1027,6 +1027,150 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shared_text_contexts_are_reused_across_notes() {
+        let repo = test_repo().await;
+
+        let first = repo
+            .save_note(SaveNoteInput {
+                note_id: Some("note-one".into()),
+                body: "First".into(),
+                capture_contexts: vec![CaptureContextInput::Text {
+                    text: "Cryptography".into(),
+                }],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+        let second = repo
+            .save_note(SaveNoteInput {
+                note_id: Some("note-two".into()),
+                body: "Second".into(),
+                capture_contexts: vec![CaptureContextInput::Text {
+                    text: "cryptography ".into(),
+                }],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+
+        let text_context_rows: Vec<(String, String, String)> =
+            sqlx::query_as("SELECT id, label, normalized_label FROM text_contexts")
+                .fetch_all(&repo.pool)
+                .await
+                .unwrap();
+        assert_eq!(text_context_rows.len(), 1);
+        assert_eq!(text_context_rows[0].1, "Cryptography");
+        assert_eq!(text_context_rows[0].2, "cryptography");
+
+        let first_refs: Vec<Option<String>> =
+            sqlx::query_scalar("SELECT text_context_id FROM capture_contexts WHERE note_id = ?")
+                .bind(&first.id)
+                .fetch_all(&repo.pool)
+                .await
+                .unwrap();
+        let second_refs: Vec<Option<String>> =
+            sqlx::query_scalar("SELECT text_context_id FROM capture_contexts WHERE note_id = ?")
+                .bind(&second.id)
+                .fetch_all(&repo.pool)
+                .await
+                .unwrap();
+
+        assert_eq!(first_refs.len(), 1);
+        assert_eq!(second_refs.len(), 1);
+        assert_eq!(first_refs[0], second_refs[0]);
+    }
+
+    #[tokio::test]
+    async fn rename_text_context_updates_all_references_and_search_data() {
+        let repo = test_repo().await;
+
+        repo.save_note(SaveNoteInput {
+            note_id: Some("note-one".into()),
+            body: "Shared note one".into(),
+            capture_contexts: vec![CaptureContextInput::Text {
+                text: "Cryptography".into(),
+            }],
+            request_analysis: false,
+        })
+        .await
+        .unwrap();
+        repo.save_note(SaveNoteInput {
+            note_id: Some("note-two".into()),
+            body: "Shared note two".into(),
+            capture_contexts: vec![CaptureContextInput::Text {
+                text: "cryptography".into(),
+            }],
+            request_analysis: false,
+        })
+        .await
+        .unwrap();
+
+        let context_id: String =
+            sqlx::query_scalar("SELECT id FROM text_contexts WHERE normalized_label = 'cryptography'")
+                .fetch_one(&repo.pool)
+                .await
+                .unwrap();
+
+        repo.rename_text_context(context_id, "Applied cryptography".into())
+            .await
+            .unwrap();
+
+        let renamed = repo.list_known_text_contexts().await.unwrap();
+        assert_eq!(renamed.len(), 1);
+        assert_eq!(renamed[0].label, "Applied cryptography");
+        assert_eq!(renamed[0].normalized_label, "applied cryptography");
+        assert_eq!(renamed[0].use_count, 2);
+
+        let reopened = repo.get_note("note-one".into()).await.unwrap().unwrap();
+        assert_eq!(reopened.capture_contexts[0].text_value.as_deref(), Some("Applied cryptography"));
+
+        let results = repo.search_notes("applied".into(), 10).await.unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(results
+            .iter()
+            .all(|item| item.matched_tags.iter().any(|tag| tag.text.contains("Applied"))));
+    }
+
+    #[tokio::test]
+    async fn rename_text_context_rejects_duplicate_normalized_label() {
+        let repo = test_repo().await;
+
+        repo.save_note(SaveNoteInput {
+            note_id: None,
+            body: "One".into(),
+            capture_contexts: vec![CaptureContextInput::Text {
+                text: "Cryptography".into(),
+            }],
+            request_analysis: false,
+        })
+        .await
+        .unwrap();
+        repo.save_note(SaveNoteInput {
+            note_id: None,
+            body: "Two".into(),
+            capture_contexts: vec![CaptureContextInput::Text {
+                text: "Number Theory".into(),
+            }],
+            request_analysis: false,
+        })
+        .await
+        .unwrap();
+
+        let context_id: String =
+            sqlx::query_scalar("SELECT id FROM text_contexts WHERE normalized_label = 'cryptography'")
+                .fetch_one(&repo.pool)
+                .await
+                .unwrap();
+
+        let error = repo
+            .rename_text_context(context_id, " number theory ".into())
+            .await
+            .unwrap_err();
+
+        assert!(error.contains("already exists"));
+    }
+
+    #[tokio::test]
     async fn search_notes_matches_body_text_and_tags() {
         let repo = test_repo().await;
         repo.save_note(SaveNoteInput {
