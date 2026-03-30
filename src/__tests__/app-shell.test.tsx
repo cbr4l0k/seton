@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import App from "../App";
 import departureMonoFontUrl from "../assets/fonts/DepartureMono-Regular.woff2?url";
-import { bootstrapWorkspace } from "../lib/tauri";
+import { bootstrapWorkspace, searchNotes } from "../lib/tauri";
 
 vi.mock("../lib/tauri", () => ({
   bootstrapWorkspace: vi.fn().mockResolvedValue({
@@ -14,6 +14,7 @@ vi.mock("../lib/tauri", () => ({
   deleteNote: vi.fn(),
   saveNote: vi.fn(),
   openNote: vi.fn(),
+  searchNotes: vi.fn().mockResolvedValue([]),
   pickImageFile: vi.fn(),
 }));
 
@@ -24,6 +25,7 @@ beforeEach(() => {
     knownTextContexts: [],
     textContextRelationships: [],
   });
+  vi.mocked(searchNotes).mockResolvedValue([]);
 });
 
 test("renders the Thought Inbox shell", () => {
@@ -152,4 +154,39 @@ test("inactive notes panel controls are removed from the tab order", async () =>
   expect(checkbox).toBeDisabled();
   expect(openButton).toBeDisabled();
   expect(deleteButton).toBeDisabled();
+});
+
+test("notes panel renders a search field and requests matches", async () => {
+  vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
+    history: [
+      {
+        id: "note-1",
+        preview: "Existing note",
+        lastOpenedAt: null,
+        updatedAt: "2026-03-24T10:00:00Z",
+      },
+    ],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
+  vi.mocked(searchNotes).mockResolvedValueOnce([
+    {
+      id: "note-1",
+      preview: "A <mark>crypto</mark> note",
+      matchedTags: [{ text: "<mark>crypto</mark>graphy" }],
+      lastOpenedAt: null,
+      updatedAt: "2026-03-30T10:00:00Z",
+    },
+  ]);
+
+  render(<App />);
+
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+  fireEvent.change(await screen.findByLabelText("Search notes"), {
+    target: { value: "crypto" },
+  });
+
+  expect(searchNotes).toHaveBeenCalledWith("crypto");
+  expect((await screen.findAllByText("crypto", { selector: "mark" })).length).toBeGreaterThan(0);
 });

@@ -8,6 +8,7 @@ const mockDeleteNote = vi.fn();
 const mockExportNotesMarkdown = vi.fn();
 const mockSaveNote = vi.fn();
 const mockOpenNote = vi.fn();
+const mockSearchNotes = vi.fn();
 const mockPickImageFile = vi.fn();
 
 vi.mock("../lib/tauri", () => ({
@@ -16,6 +17,7 @@ vi.mock("../lib/tauri", () => ({
   exportNotesMarkdown: (noteIds: string[]) => mockExportNotesMarkdown(noteIds),
   saveNote: (input: unknown) => mockSaveNote(input),
   openNote: (noteId: string) => mockOpenNote(noteId),
+  searchNotes: (query: string) => mockSearchNotes(query),
   pickImageFile: () => mockPickImageFile(),
 }));
 
@@ -89,6 +91,7 @@ beforeEach(() => {
   mockExportNotesMarkdown.mockReset();
   mockSaveNote.mockReset();
   mockOpenNote.mockReset();
+  mockSearchNotes.mockReset();
   mockPickImageFile.mockReset();
 });
 
@@ -268,6 +271,39 @@ test("bootstrap history timestamps are displayed as dd.mm.yyyy", async () => {
   render(<App />);
 
   expect(await screen.findByText("24.03.2026")).toBeInTheDocument();
+});
+
+test("up down and enter navigate and open search results from the notes panel", async () => {
+  mockBootstrapWorkspace.mockResolvedValue(makeWorkspacePayload());
+  mockSearchNotes.mockResolvedValue([
+    {
+      id: "note-a",
+      preview: "<mark>Crypto</mark> A",
+      matchedTags: [],
+      lastOpenedAt: null,
+      updatedAt: "2026-03-29T10:00:00Z",
+    },
+    {
+      id: "note-b",
+      preview: "<mark>Crypto</mark> B",
+      matchedTags: [],
+      lastOpenedAt: null,
+      updatedAt: "2026-03-28T10:00:00Z",
+    },
+  ]);
+  mockOpenNote.mockResolvedValue(makeSavedNoteDetail());
+
+  render(<App />);
+
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+  fireEvent.change(await screen.findByLabelText("Search notes"), {
+    target: { value: "crypto" },
+  });
+  await screen.findByRole("button", { name: "Open search result 2" });
+  fireEvent.keyDown(screen.getByLabelText("Search notes"), { key: "ArrowDown" });
+  fireEvent.keyDown(screen.getByLabelText("Search notes"), { key: "Enter" });
+
+  expect(mockOpenNote).toHaveBeenCalledWith("note-b");
 });
 
 test("ArrowRight advances from the create entry to the first suggestion, then to the next", async () => {

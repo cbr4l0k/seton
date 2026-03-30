@@ -11,6 +11,18 @@ export type RecentNote = {
   updatedAt: string;
 };
 
+export type MatchedTag = {
+  text: string;
+};
+
+export type NoteSearchResult = {
+  id: string;
+  preview: string;
+  matchedTags: MatchedTag[];
+  lastOpenedAt: string | null;
+  updatedAt: string;
+};
+
 export type KnownTextContext = {
   label: string;
   normalizedLabel: string;

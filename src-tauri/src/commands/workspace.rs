@@ -6,7 +6,7 @@ use crate::db::repository::{
     KnownTextContext, SaveNoteInput, TextContextRelationship, TextContextSuggestionData,
 };
 use crate::domain::capture_context::{CaptureContext, CaptureContextInput};
-use crate::domain::note::{NoteDetail, RecentNote};
+use crate::domain::note::{MatchedTag, NoteDetail, NoteSearchResult, RecentNote};
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,6 +46,22 @@ pub struct NoteDetailDto {
     pub created_at: String,
     pub updated_at: String,
     pub capture_contexts: Vec<CaptureContextDto>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchedTagDto {
+    pub text: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteSearchResultDto {
+    pub id: String,
+    pub preview: String,
+    pub last_opened_at: Option<String>,
+    pub updated_at: String,
+    pub matched_tags: Vec<MatchedTagDto>,
 }
 
 #[derive(Clone, Serialize)]
@@ -121,6 +137,14 @@ pub async fn delete_note(state: tauri::State<'_, AppState>, note_id: String) -> 
 }
 
 #[tauri::command]
+pub async fn search_notes(
+    state: tauri::State<'_, AppState>,
+    query: String,
+) -> Result<Vec<NoteSearchResultDto>, String> {
+    search_notes_with_state(state.inner(), query).await
+}
+
+#[tauri::command]
 pub async fn export_notes_markdown(
     state: tauri::State<'_, AppState>,
     note_ids: Vec<String>,
@@ -183,6 +207,17 @@ pub async fn open_note_with_state(
         .await?
         .ok_or_else(|| "note not found".to_string())
         .map(NoteDetailDto::from)
+}
+
+pub async fn search_notes_with_state(
+    state: &AppState,
+    query: String,
+) -> Result<Vec<NoteSearchResultDto>, String> {
+    state
+        .repository
+        .search_notes(query, 24)
+        .await
+        .map(|results| results.into_iter().map(NoteSearchResultDto::from).collect())
 }
 
 fn placeholder_panels() -> Vec<PlaceholderPanelDto> {
@@ -254,6 +289,28 @@ impl From<CaptureContext> for CaptureContextDto {
     }
 }
 
+impl From<MatchedTag> for MatchedTagDto {
+    fn from(value: MatchedTag) -> Self {
+        Self { text: value.text }
+    }
+}
+
+impl From<NoteSearchResult> for NoteSearchResultDto {
+    fn from(value: NoteSearchResult) -> Self {
+        Self {
+            id: value.id,
+            preview: value.preview,
+            last_opened_at: value.last_opened_at,
+            updated_at: value.updated_at,
+            matched_tags: value
+                .matched_tags
+                .into_iter()
+                .map(MatchedTagDto::from)
+                .collect(),
+        }
+    }
+}
+
 impl From<CaptureContextRequest> for CaptureContextInput {
     fn from(value: CaptureContextRequest) -> Self {
         match value {
@@ -293,7 +350,7 @@ mod tests {
     use crate::db::schema::connect;
     use crate::domain::capture_context::CaptureContextInput;
 
-    use super::bootstrap_workspace_with_state;
+    use super::{bootstrap_workspace_with_state, search_notes_with_state};
 
     #[tokio::test]
     async fn bootstrap_workspace_returns_recent_notes() {
@@ -335,6 +392,25 @@ mod tests {
         }));
     }
 
+    #[tokio::test]
+    async fn search_notes_returns_ranked_results_with_highlighted_tags() {
+        let state = seeded_state_with_recent_note().await;
+
+        let results = search_notes_with_state(&state, "seed".into())
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "seed-note");
+        assert!(
+            results[0].preview.contains("<mark>")
+                || results[0]
+                    .matched_tags
+                    .iter()
+                    .any(|tag| tag.text.contains("<mark>"))
+        );
+    }
+
     async fn seeded_state_with_recent_note() -> AppState {
         let temp = TempDir::new().unwrap();
         let root = temp.keep();
@@ -346,7 +422,7 @@ mod tests {
         state
             .repository
             .save_note(SaveNoteInput {
-                note_id: None,
+                note_id: Some("seed-note".into()),
                 body: "Seed note".into(),
                 capture_contexts: vec![CaptureContextInput::Text {
                     text: "Seed context".into(),
@@ -368,9 +444,9 @@ mod tests {
             &path,
             [
                 137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0,
-                1, 8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99,
-                248, 15, 4, 0, 9, 251, 3, 253, 160, 77, 167, 219, 0, 0, 0, 0, 73, 69, 78, 68, 174,
-                66, 96, 130,
+                1, 8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248,
+                15, 4, 0, 9, 251, 3, 253, 160, 77, 167, 219, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66,
+                96, 130,
             ],
         )
         .unwrap();

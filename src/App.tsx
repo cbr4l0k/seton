@@ -7,10 +7,18 @@ import { PlaceholderPanel } from "./components/PlaceholderPanel";
 import { WorkspaceCanvas } from "./components/WorkspaceCanvas";
 import { useSpatialNavigation } from "./hooks/useSpatialNavigation";
 import type { DraftCaptureContext } from "./components/CaptureContextEditor";
-import { bootstrapWorkspace, deleteNote, exportNotesMarkdown, openNote, saveNote } from "./lib/tauri";
+import {
+  bootstrapWorkspace,
+  deleteNote,
+  exportNotesMarkdown,
+  openNote,
+  saveNote,
+  searchNotes,
+} from "./lib/tauri";
 import type {
   CaptureContext,
   KnownTextContext,
+  NoteSearchResult,
   RecentNote,
   SaveNoteRequest,
   TextContextRelationship,
@@ -28,6 +36,9 @@ export default function App() {
   const [body, setBody] = useState("");
   const [contexts, setContexts] = useState<DraftCaptureContext[]>([]);
   const [historyItems, setHistoryItems] = useState<RecentNote[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<NoteSearchResult[]>([]);
+  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const [knownTextContexts, setKnownTextContexts] = useState<KnownTextContext[]>([]);
   const [textContextRelationships, setTextContextRelationships] = useState<TextContextRelationship[]>([]);
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
@@ -67,6 +78,39 @@ export default function App() {
   }, [toastMessage]);
 
   useEffect(() => {
+    const trimmedQuery = searchQuery.trim();
+    if (!trimmedQuery) {
+      setSearchResults([]);
+      setActiveSearchIndex(0);
+      return;
+    }
+
+    let cancelled = false;
+
+    void searchNotes(trimmedQuery)
+      .then((results) => {
+        if (cancelled) {
+          return;
+        }
+
+        setSearchResults(results.map(formatSearchResult));
+        setActiveSearchIndex(0);
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+
+        setSearchResults([]);
+        setActiveSearchIndex(0);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchQuery]);
+
+  useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (!(event.ctrlKey || event.metaKey) || event.key !== "Enter") {
         return;
@@ -95,6 +139,9 @@ export default function App() {
     setCurrentNoteId(detail.id);
     setBody(detail.body);
     setContexts(nextContexts);
+    setSearchQuery("");
+    setSearchResults([]);
+    setActiveSearchIndex(0);
     syncLoadedSnapshot(detail.id, detail.body, nextContexts);
     setPosition("center");
   }
@@ -299,11 +346,16 @@ export default function App() {
 
       <HistoryPanel
         active={position === "bottom"}
+        activeSearchIndex={activeSearchIndex}
         items={historyItems}
         onDelete={(noteId) => void handleDeleteNote(noteId)}
         onExport={() => void handleExportSelectedNotes()}
         onOpen={(noteId) => void handleOpenNote(noteId)}
+        onSearchActiveIndexChange={setActiveSearchIndex}
+        onSearchQueryChange={setSearchQuery}
         onSelectionChange={handleHistorySelectionChange}
+        searchQuery={searchQuery}
+        searchResults={searchResults}
         selectedNoteIds={selectedNoteIds}
       />
 
@@ -357,6 +409,13 @@ function upsertHistoryItem(items: RecentNote[], noteId: string, body: string, up
 }
 
 function formatHistoryItem(item: RecentNote): RecentNote {
+  return {
+    ...item,
+    updatedAt: formatHistoryTimestamp(item.updatedAt),
+  };
+}
+
+function formatSearchResult(item: NoteSearchResult): NoteSearchResult {
   return {
     ...item,
     updatedAt: formatHistoryTimestamp(item.updatedAt),

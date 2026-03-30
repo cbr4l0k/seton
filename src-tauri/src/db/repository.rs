@@ -1,5 +1,5 @@
-use std::ffi::OsStr;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::ffi::OsStr;
 use std::path::Path;
 
 use chrono::Utc;
@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::app_state::AppPaths;
 use crate::domain::capture_context::{CaptureContext, CaptureContextInput, CaptureContextKind};
-use crate::domain::note::{AnalysisStatus, NoteDetail, RecentNote};
+use crate::domain::note::{AnalysisStatus, MatchedTag, NoteDetail, NoteSearchResult, RecentNote};
 
 #[derive(Clone)]
 pub struct NoteRepository {
@@ -138,6 +138,8 @@ impl NoteRepository {
             .map_err(|err| err.to_string())?;
         }
 
+        upsert_note_search_index(&mut *tx, &note_id, body, &input.capture_contexts).await?;
+
         tx.commit().await.map_err(|err| err.to_string())?;
 
         self.get_note(note_id)
@@ -222,6 +224,12 @@ impl NoteRepository {
     }
 
     pub async fn delete_note(&self, note_id: String) -> Result<(), String> {
+        sqlx::query("DELETE FROM note_search WHERE note_id = ?")
+            .bind(&note_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|err| err.to_string())?;
+
         sqlx::query("DELETE FROM notes WHERE id = ?")
             .bind(note_id)
             .execute(&self.pool)
@@ -229,6 +237,43 @@ impl NoteRepository {
             .map_err(|err| err.to_string())?;
 
         Ok(())
+    }
+
+    pub async fn search_notes(
+        &self,
+        query: String,
+        limit: i64,
+    ) -> Result<Vec<NoteSearchResult>, String> {
+        let Some(match_query) = build_fts_match_query(&query) else {
+            return Ok(Vec::new());
+        };
+
+        sqlx::query_as::<_, NoteSearchRow>(
+            "SELECT
+                notes.id,
+                notes.body,
+                COALESCE(
+                    NULLIF(snippet(note_search, 1, '<mark>', '</mark>', '...', 18), ''),
+                    ''
+                ) AS preview,
+                notes.last_opened_at,
+                notes.updated_at,
+                highlight(note_search, 2, '<mark>', '</mark>') AS highlighted_tags
+             FROM note_search
+             JOIN notes ON notes.id = note_search.note_id
+             WHERE note_search MATCH ?
+             ORDER BY bm25(note_search), COALESCE(notes.last_opened_at, notes.updated_at) DESC, notes.id ASC
+             LIMIT ?",
+        )
+        .bind(match_query)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .map(NoteSearchRow::into_domain)
+        .collect::<Vec<_>>()
+        .pipe(Ok)
     }
 
     pub async fn list_text_context_suggestion_data(
@@ -239,7 +284,8 @@ impl NoteRepository {
         let mut note_contexts: HashMap<String, BTreeSet<String>> = HashMap::new();
 
         for row in rows {
-            let Some((label, normalized_label)) = normalized_text_label(row.text_value.as_deref()) else {
+            let Some((label, normalized_label)) = normalized_text_label(row.text_value.as_deref())
+            else {
                 continue;
             };
 
@@ -291,17 +337,19 @@ impl NoteRepository {
 
         let mut text_context_relationships = pair_counts
             .into_iter()
-            .map(|((left_normalized, right_normalized), use_count)| TextContextRelationship {
-                left: contexts
-                    .get(&left_normalized)
-                    .map(|summary| summary.label.clone())
-                    .unwrap_or(left_normalized),
-                right: contexts
-                    .get(&right_normalized)
-                    .map(|summary| summary.label.clone())
-                    .unwrap_or(right_normalized),
-                use_count,
-            })
+            .map(
+                |((left_normalized, right_normalized), use_count)| TextContextRelationship {
+                    left: contexts
+                        .get(&left_normalized)
+                        .map(|summary| summary.label.clone())
+                        .unwrap_or(left_normalized),
+                    right: contexts
+                        .get(&right_normalized)
+                        .map(|summary| summary.label.clone())
+                        .unwrap_or(right_normalized),
+                    use_count,
+                },
+            )
             .collect::<Vec<_>>();
 
         text_context_relationships.sort_by(|left, right| {
@@ -324,7 +372,9 @@ impl NoteRepository {
             .map(|data| data.known_text_contexts)
     }
 
-    pub async fn list_text_context_relationships(&self) -> Result<Vec<TextContextRelationship>, String> {
+    pub async fn list_text_context_relationships(
+        &self,
+    ) -> Result<Vec<TextContextRelationship>, String> {
         self.list_text_context_suggestion_data()
             .await
             .map(|data| data.text_context_relationships)
@@ -335,9 +385,7 @@ impl NoteRepository {
             return Err("at least one note must be selected".into());
         }
 
-        let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT id, body FROM notes WHERE id IN (",
-        );
+        let mut query = QueryBuilder::<Sqlite>::new("SELECT id, body FROM notes WHERE id IN (");
         let mut separated = query.separated(", ");
 
         for note_id in note_ids {
@@ -452,6 +500,32 @@ struct KnownTextContextSummary {
     use_count: i64,
 }
 
+#[derive(sqlx::FromRow)]
+struct NoteSearchRow {
+    id: String,
+    body: String,
+    preview: String,
+    last_opened_at: Option<String>,
+    updated_at: String,
+    highlighted_tags: String,
+}
+
+impl NoteSearchRow {
+    fn into_domain(self) -> NoteSearchResult {
+        NoteSearchResult {
+            id: self.id,
+            preview: if self.preview.trim().is_empty() {
+                preview_text(&self.body)
+            } else {
+                self.preview
+            },
+            last_opened_at: self.last_opened_at,
+            updated_at: self.updated_at,
+            matched_tags: parse_highlighted_tags(&self.highlighted_tags),
+        }
+    }
+}
+
 fn render_export_note(body: String, capture_contexts: Vec<CaptureContextRow>) -> String {
     if capture_contexts.is_empty() {
         return body;
@@ -475,7 +549,10 @@ fn export_context_label(context: CaptureContextRow) -> String {
             context
                 .managed_path
                 .or(context.source_path)
-                .and_then(|path| Path::new(&path).file_name().and_then(OsStr::to_str).map(str::to_string))
+                .and_then(|path| Path::new(&path)
+                    .file_name()
+                    .and_then(OsStr::to_str)
+                    .map(str::to_string))
                 .unwrap_or_else(|| "image".to_string())
         ),
         _ => "- context".to_string(),
@@ -489,6 +566,74 @@ fn normalized_text_label(value: Option<&str>) -> Option<(String, String)> {
     }
 
     Some((trimmed.to_string(), trimmed.to_lowercase()))
+}
+
+async fn upsert_note_search_index(
+    connection: &mut sqlx::SqliteConnection,
+    note_id: &str,
+    body: &str,
+    capture_contexts: &[CaptureContextInput],
+) -> Result<(), String> {
+    let tags = searchable_tag_text(capture_contexts);
+
+    sqlx::query("DELETE FROM note_search WHERE note_id = ?")
+        .bind(note_id)
+        .execute(&mut *connection)
+        .await
+        .map_err(|err| err.to_string())?;
+
+    sqlx::query("INSERT INTO note_search (note_id, body, tags) VALUES (?, ?, ?)")
+        .bind(note_id)
+        .bind(body)
+        .bind(tags)
+        .execute(&mut *connection)
+        .await
+        .map_err(|err| err.to_string())?;
+
+    Ok(())
+}
+
+fn searchable_tag_text(capture_contexts: &[CaptureContextInput]) -> String {
+    capture_contexts
+        .iter()
+        .filter_map(|context| match context {
+            CaptureContextInput::Text { text } => Some(text.trim()),
+            CaptureContextInput::Url { url } => Some(url.trim()),
+            CaptureContextInput::Image { .. } => None,
+        })
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ||| ")
+}
+
+fn build_fts_match_query(query: &str) -> Option<String> {
+    let tokens = query
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(|token| format!("\"{}\"*", token.replace('"', "\"\"")))
+        .collect::<Vec<_>>();
+
+    if tokens.is_empty() {
+        None
+    } else {
+        Some(tokens.join(" "))
+    }
+}
+
+fn parse_highlighted_tags(value: &str) -> Vec<MatchedTag> {
+    value
+        .split(" ||| ")
+        .filter_map(|tag| {
+            let trimmed = tag.trim();
+            if trimmed.is_empty() || !trimmed.contains("<mark>") {
+                return None;
+            }
+
+            Some(MatchedTag {
+                text: trimmed.to_string(),
+            })
+        })
+        .collect()
 }
 
 async fn persist_capture_context(
@@ -879,6 +1024,67 @@ mod tests {
                 && relationship.right == "number theory"
                 && relationship.use_count == 2
         }));
+    }
+
+    #[tokio::test]
+    async fn search_notes_matches_body_text_and_tags() {
+        let repo = test_repo().await;
+        repo.save_note(SaveNoteInput {
+            note_id: Some("note-body-hit".into()),
+            body: "Practical cipher notes for study".into(),
+            capture_contexts: vec![
+                CaptureContextInput::Text {
+                    text: "classical cryptography".into(),
+                },
+                CaptureContextInput::Url {
+                    url: "https://cipher.example/reference".into(),
+                },
+            ],
+            request_analysis: false,
+        })
+        .await
+        .unwrap();
+        repo.save_note(SaveNoteInput {
+            note_id: Some("note-no-hit".into()),
+            body: "Combinatorics reminder".into(),
+            capture_contexts: vec![CaptureContextInput::Text {
+                text: "graph theory".into(),
+            }],
+            request_analysis: false,
+        })
+        .await
+        .unwrap();
+
+        let results = repo.search_notes("cipher".into(), 10).await.unwrap();
+
+        assert_eq!(results[0].id, "note-body-hit");
+        assert!(results[0].preview.contains("mark"));
+        assert!(results[0]
+            .matched_tags
+            .iter()
+            .any(|tag| tag.text.contains("cipher")));
+    }
+
+    #[tokio::test]
+    async fn search_notes_excludes_deleted_notes() {
+        let repo = test_repo().await;
+        let note = repo
+            .save_note(SaveNoteInput {
+                note_id: Some("note-delete".into()),
+                body: "Seed search note".into(),
+                capture_contexts: vec![CaptureContextInput::Text {
+                    text: "seed".into(),
+                }],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+
+        repo.delete_note(note.id).await.unwrap();
+
+        let results = repo.search_notes("seed".into(), 10).await.unwrap();
+
+        assert!(results.is_empty());
     }
 
     async fn test_repo() -> NoteRepository {

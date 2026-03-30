@@ -35,3 +35,17 @@ pub struct RecentNote {
     pub last_opened_at: Option<String>,
     pub updated_at: String,
 }
+
+#[derive(Clone, Debug)]
+pub struct MatchedTag {
+    pub text: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct NoteSearchResult {
+    pub id: String,
+    pub preview: String,
+    pub last_opened_at: Option<String>,
+    pub updated_at: String,
+    pub matched_tags: Vec<MatchedTag>,
+}

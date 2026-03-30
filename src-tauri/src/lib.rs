@@ -28,6 +28,7 @@ pub fn run() {
             commands::workspace::save_note,
             commands::workspace::open_note,
             commands::workspace::delete_note,
+            commands::workspace::search_notes,
             commands::workspace::export_notes_markdown
         ])
         .run(tauri::generate_context!())
