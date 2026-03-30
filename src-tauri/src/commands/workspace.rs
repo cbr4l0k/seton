@@ -3,7 +3,8 @@ use tokio::fs;
 
 use crate::app_state::AppState;
 use crate::db::repository::{
-    KnownTextContext, SaveNoteInput, TextContextRelationship, TextContextSuggestionData,
+    EditableTextContext, KnownTextContext, SaveNoteInput, TextContextRelationship,
+    TextContextSuggestionData,
 };
 use crate::domain::capture_context::{CaptureContext, CaptureContextInput};
 use crate::domain::note::{MatchedTag, NoteDetail, NoteSearchResult, RecentNote};
@@ -15,6 +16,7 @@ pub struct WorkspacePayload {
     pub placeholders: Vec<PlaceholderPanelDto>,
     pub known_text_contexts: Vec<KnownTextContextDto>,
     pub text_context_relationships: Vec<TextContextRelationshipDto>,
+    pub editable_text_contexts: Vec<EditableTextContextDto>,
 }
 
 #[derive(Clone, Serialize)]
@@ -91,6 +93,15 @@ pub struct TextContextRelationshipDto {
     pub use_count: i64,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditableTextContextDto {
+    pub id: String,
+    pub label: String,
+    pub normalized_label: String,
+    pub use_count: i64,
+}
+
 #[derive(Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveNoteRequest {
@@ -106,6 +117,13 @@ pub enum CaptureContextRequest {
     Text { text: String },
     Url { url: String },
     Image { source_path: String },
+}
+
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameTextContextRequest {
+    pub text_context_id: String,
+    pub label: String,
 }
 
 #[tauri::command]
@@ -145,6 +163,17 @@ pub async fn search_notes(
 }
 
 #[tauri::command]
+pub async fn rename_text_context(
+    state: tauri::State<'_, AppState>,
+    input: RenameTextContextRequest,
+) -> Result<(), String> {
+    state
+        .repository
+        .rename_text_context(input.text_context_id, input.label)
+        .await
+}
+
+#[tauri::command]
 pub async fn export_notes_markdown(
     state: tauri::State<'_, AppState>,
     note_ids: Vec<String>,
@@ -162,6 +191,7 @@ pub async fn bootstrap_workspace_with_state(state: &AppState) -> Result<Workspac
         known_text_contexts,
         text_context_relationships,
     } = state.repository.list_text_context_suggestion_data().await?;
+    let editable_text_contexts = state.repository.list_editable_text_contexts().await?;
 
     Ok(WorkspacePayload {
         history: history.into_iter().map(RecentNoteDto::from).collect(),
@@ -173,6 +203,10 @@ pub async fn bootstrap_workspace_with_state(state: &AppState) -> Result<Workspac
         text_context_relationships: text_context_relationships
             .into_iter()
             .map(TextContextRelationshipDto::from)
+            .collect(),
+        editable_text_contexts: editable_text_contexts
+            .into_iter()
+            .map(EditableTextContextDto::from)
             .collect(),
     })
 }
@@ -292,6 +326,17 @@ impl From<CaptureContext> for CaptureContextDto {
 impl From<MatchedTag> for MatchedTagDto {
     fn from(value: MatchedTag) -> Self {
         Self { text: value.text }
+    }
+}
+
+impl From<EditableTextContext> for EditableTextContextDto {
+    fn from(value: EditableTextContext) -> Self {
+        Self {
+            id: value.id,
+            label: value.label,
+            normalized_label: value.normalized_label,
+            use_count: value.use_count,
+        }
     }
 }
 

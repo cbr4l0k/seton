@@ -32,6 +32,14 @@ pub struct KnownTextContext {
 }
 
 #[derive(Clone, Debug)]
+pub struct EditableTextContext {
+    pub id: String,
+    pub label: String,
+    pub normalized_label: String,
+    pub use_count: i64,
+}
+
+#[derive(Clone, Debug)]
 pub struct TextContextRelationship {
     pub left: String,
     pub right: String,
@@ -115,18 +123,19 @@ impl NoteRepository {
         }
 
         for context in &input.capture_contexts {
-            let persisted = persist_capture_context(&self.paths, &note_id, context)
+            let persisted = persist_capture_context(&self.paths, &mut *tx, &note_id, context)
                 .await
                 .map_err(|err| err.to_string())?;
 
             sqlx::query(
                 "INSERT INTO capture_contexts (
-                    id, note_id, context_type, text_value, url_value, source_path, managed_path, created_at, updated_at
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    id, note_id, context_type, text_context_id, text_value, url_value, source_path, managed_path, created_at, updated_at
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&persisted.id)
             .bind(&persisted.note_id)
             .bind(context_kind_as_str(&persisted.kind))
+            .bind(persisted.text_context_id.as_deref())
             .bind(persisted.text_value.as_deref())
             .bind(persisted.url_value.as_deref())
             .bind(persisted.source_path.as_deref())
@@ -138,7 +147,7 @@ impl NoteRepository {
             .map_err(|err| err.to_string())?;
         }
 
-        upsert_note_search_index(&mut *tx, &note_id, body, &input.capture_contexts).await?;
+        upsert_note_search_index(&mut *tx, &note_id, body).await?;
 
         tx.commit().await.map_err(|err| err.to_string())?;
 
@@ -162,10 +171,21 @@ impl NoteRepository {
         };
 
         let capture_contexts = sqlx::query_as::<_, CaptureContextRow>(
-            "SELECT id, note_id, context_type, text_value, url_value, source_path, managed_path, created_at, updated_at
+            "SELECT
+                capture_contexts.id,
+                capture_contexts.note_id,
+                capture_contexts.context_type,
+                capture_contexts.text_context_id,
+                COALESCE(text_contexts.label, capture_contexts.text_value) AS text_value,
+                capture_contexts.url_value,
+                capture_contexts.source_path,
+                capture_contexts.managed_path,
+                capture_contexts.created_at,
+                capture_contexts.updated_at
              FROM capture_contexts
+             LEFT JOIN text_contexts ON text_contexts.id = capture_contexts.text_context_id
              WHERE note_id = ?
-             ORDER BY created_at ASC, id ASC",
+             ORDER BY capture_contexts.created_at ASC, capture_contexts.id ASC",
         )
         .bind(&note_id)
         .fetch_all(&self.pool)
@@ -380,6 +400,89 @@ impl NoteRepository {
             .map(|data| data.text_context_relationships)
     }
 
+    pub async fn list_editable_text_contexts(&self) -> Result<Vec<EditableTextContext>, String> {
+        sqlx::query_as::<_, EditableTextContextRow>(
+            "SELECT
+                text_contexts.id,
+                text_contexts.label,
+                text_contexts.normalized_label,
+                COUNT(capture_contexts.id) AS use_count
+             FROM text_contexts
+             LEFT JOIN capture_contexts ON capture_contexts.text_context_id = text_contexts.id
+             GROUP BY text_contexts.id, text_contexts.label, text_contexts.normalized_label
+             ORDER BY COUNT(capture_contexts.id) DESC, text_contexts.normalized_label ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .map(EditableTextContextRow::into_domain)
+        .collect::<Result<Vec<_>, _>>()
+    }
+
+    pub async fn rename_text_context(
+        &self,
+        text_context_id: String,
+        next_label: String,
+    ) -> Result<(), String> {
+        let trimmed = next_label.trim();
+        if trimmed.is_empty() {
+            return Err("text context label cannot be empty".into());
+        }
+
+        let normalized_label = trimmed.to_lowercase();
+        let mut tx = self.pool.begin().await.map_err(|err| err.to_string())?;
+
+        let existing_duplicate: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM text_contexts WHERE normalized_label = ? AND id != ?",
+        )
+        .bind(&normalized_label)
+        .bind(&text_context_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|err| err.to_string())?;
+
+        if existing_duplicate.is_some() {
+            return Err("a text context with that label already exists".into());
+        }
+
+        let updated_rows = sqlx::query(
+            "UPDATE text_contexts
+             SET label = ?, normalized_label = ?, updated_at = ?
+             WHERE id = ?",
+        )
+        .bind(trimmed)
+        .bind(&normalized_label)
+        .bind(now_timestamp())
+        .bind(&text_context_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| err.to_string())?
+        .rows_affected();
+
+        if updated_rows == 0 {
+            return Err("text context not found".into());
+        }
+
+        let affected_notes: Vec<(String, String)> = sqlx::query_as(
+            "SELECT notes.id, notes.body
+             FROM notes
+             JOIN capture_contexts ON capture_contexts.note_id = notes.id
+             WHERE capture_contexts.text_context_id = ?
+             GROUP BY notes.id, notes.body",
+        )
+        .bind(&text_context_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|err| err.to_string())?;
+
+        for (note_id, body) in affected_notes {
+            upsert_note_search_index(&mut *tx, &note_id, &body).await?;
+        }
+
+        tx.commit().await.map_err(|err| err.to_string())
+    }
+
     pub async fn export_notes_markdown(&self, note_ids: Vec<String>) -> Result<String, String> {
         if note_ids.is_empty() {
             return Err("at least one note must be selected".into());
@@ -404,10 +507,21 @@ impl NoteRepository {
 
         for row in rows {
             let capture_contexts = sqlx::query_as::<_, CaptureContextRow>(
-                "SELECT id, note_id, context_type, text_value, url_value, source_path, managed_path, created_at, updated_at
+                "SELECT
+                    capture_contexts.id,
+                    capture_contexts.note_id,
+                    capture_contexts.context_type,
+                    capture_contexts.text_context_id,
+                    COALESCE(text_contexts.label, capture_contexts.text_value) AS text_value,
+                    capture_contexts.url_value,
+                    capture_contexts.source_path,
+                    capture_contexts.managed_path,
+                    capture_contexts.created_at,
+                    capture_contexts.updated_at
                  FROM capture_contexts
+                 LEFT JOIN text_contexts ON text_contexts.id = capture_contexts.text_context_id
                  WHERE note_id = ?
-                 ORDER BY created_at ASC, id ASC",
+                 ORDER BY capture_contexts.created_at ASC, capture_contexts.id ASC",
             )
             .bind(&row.id)
             .fetch_all(&self.pool)
@@ -422,10 +536,13 @@ impl NoteRepository {
 
     async fn load_text_context_rows(&self) -> Result<Vec<TextContextRow>, String> {
         sqlx::query_as::<_, TextContextRow>(
-            "SELECT note_id, text_value
+            "SELECT
+                capture_contexts.note_id,
+                COALESCE(text_contexts.label, capture_contexts.text_value) AS text_value
              FROM capture_contexts
+             LEFT JOIN text_contexts ON text_contexts.id = capture_contexts.text_context_id
              WHERE context_type = 'text'
-             ORDER BY created_at ASC, id ASC",
+             ORDER BY capture_contexts.created_at ASC, capture_contexts.id ASC",
         )
         .fetch_all(&self.pool)
         .await
@@ -450,6 +567,7 @@ struct CaptureContextRow {
     id: String,
     note_id: String,
     context_type: String,
+    text_context_id: Option<String>,
     text_value: Option<String>,
     url_value: Option<String>,
     source_path: Option<String>,
@@ -464,6 +582,7 @@ impl CaptureContextRow {
             id: self.id,
             note_id: self.note_id,
             kind: parse_context_kind(&self.context_type)?,
+            text_context_id: self.text_context_id,
             text_value: self.text_value,
             url_value: self.url_value,
             source_path: self.source_path,
@@ -492,6 +611,25 @@ struct ExportNoteRow {
 struct TextContextRow {
     note_id: String,
     text_value: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct EditableTextContextRow {
+    id: String,
+    label: String,
+    normalized_label: String,
+    use_count: i64,
+}
+
+impl EditableTextContextRow {
+    fn into_domain(self) -> Result<EditableTextContext, String> {
+        Ok(EditableTextContext {
+            id: self.id,
+            label: self.label,
+            normalized_label: self.normalized_label,
+            use_count: self.use_count,
+        })
+    }
 }
 
 struct KnownTextContextSummary {
@@ -572,9 +710,8 @@ async fn upsert_note_search_index(
     connection: &mut sqlx::SqliteConnection,
     note_id: &str,
     body: &str,
-    capture_contexts: &[CaptureContextInput],
 ) -> Result<(), String> {
-    let tags = searchable_tag_text(capture_contexts);
+    let tags = searchable_tag_text(connection, note_id).await?;
 
     sqlx::query("DELETE FROM note_search WHERE note_id = ?")
         .bind(note_id)
@@ -593,17 +730,34 @@ async fn upsert_note_search_index(
     Ok(())
 }
 
-fn searchable_tag_text(capture_contexts: &[CaptureContextInput]) -> String {
-    capture_contexts
-        .iter()
-        .filter_map(|context| match context {
-            CaptureContextInput::Text { text } => Some(text.trim()),
-            CaptureContextInput::Url { url } => Some(url.trim()),
-            CaptureContextInput::Image { .. } => None,
-        })
+async fn searchable_tag_text(
+    connection: &mut sqlx::SqliteConnection,
+    note_id: &str,
+) -> Result<String, String> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT
+            CASE
+                WHEN capture_contexts.context_type = 'text' THEN trim(COALESCE(text_contexts.label, capture_contexts.text_value, ''))
+                WHEN capture_contexts.context_type = 'url' THEN trim(COALESCE(capture_contexts.url_value, ''))
+                ELSE ''
+            END AS value
+         FROM capture_contexts
+         LEFT JOIN text_contexts ON text_contexts.id = capture_contexts.text_context_id
+         WHERE capture_contexts.note_id = ?
+           AND capture_contexts.context_type IN ('text', 'url')
+         ORDER BY capture_contexts.created_at ASC, capture_contexts.id ASC",
+    )
+    .bind(note_id)
+    .fetch_all(&mut *connection)
+    .await
+    .map_err(|err| err.to_string())?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(value,)| value)
         .filter(|value| !value.is_empty())
         .collect::<Vec<_>>()
-        .join(" ||| ")
+        .join(" ||| "))
 }
 
 fn build_fts_match_query(query: &str) -> Option<String> {
@@ -638,6 +792,7 @@ fn parse_highlighted_tags(value: &str) -> Vec<MatchedTag> {
 
 async fn persist_capture_context(
     paths: &AppPaths,
+    connection: &mut sqlx::SqliteConnection,
     note_id: &str,
     input: &CaptureContextInput,
 ) -> Result<CaptureContext, std::io::Error> {
@@ -649,7 +804,8 @@ async fn persist_capture_context(
             id,
             note_id: note_id.to_string(),
             kind: CaptureContextKind::Text,
-            text_value: Some(text.trim().to_string()),
+            text_context_id: Some(find_or_create_text_context(connection, text.trim()).await?),
+            text_value: None,
             url_value: None,
             source_path: None,
             managed_path: None,
@@ -660,6 +816,7 @@ async fn persist_capture_context(
             id,
             note_id: note_id.to_string(),
             kind: CaptureContextKind::Url,
+            text_context_id: None,
             text_value: None,
             url_value: Some(url.trim().to_string()),
             source_path: None,
@@ -680,6 +837,7 @@ async fn persist_capture_context(
                 id,
                 note_id: note_id.to_string(),
                 kind: CaptureContextKind::Image,
+                text_context_id: None,
                 text_value: None,
                 url_value: None,
                 source_path: Some(source_path.clone()),
@@ -691,6 +849,46 @@ async fn persist_capture_context(
     };
 
     Ok(context)
+}
+
+async fn find_or_create_text_context(
+    connection: &mut sqlx::SqliteConnection,
+    label: &str,
+) -> Result<String, std::io::Error> {
+    let trimmed = label.trim();
+    let normalized_label = trimmed.to_lowercase();
+
+    if let Some(existing_id) =
+        sqlx::query_scalar::<_, String>("SELECT id FROM text_contexts WHERE normalized_label = ?")
+            .bind(&normalized_label)
+            .fetch_optional(&mut *connection)
+            .await
+            .map_err(sqlx_to_io)?
+    {
+        return Ok(existing_id);
+    }
+
+    let id = Uuid::new_v4().to_string();
+    let now = now_timestamp();
+
+    sqlx::query(
+        "INSERT INTO text_contexts (id, label, normalized_label, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(trimmed)
+    .bind(&normalized_label)
+    .bind(&now)
+    .bind(&now)
+    .execute(&mut *connection)
+    .await
+    .map_err(sqlx_to_io)?;
+
+    Ok(id)
+}
+
+fn sqlx_to_io(error: sqlx::Error) -> std::io::Error {
+    std::io::Error::other(error.to_string())
 }
 
 fn now_timestamp() -> String {

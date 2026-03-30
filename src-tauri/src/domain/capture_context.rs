@@ -17,6 +17,7 @@ pub struct CaptureContext {
     pub id: String,
     pub note_id: String,
     pub kind: CaptureContextKind,
+    pub text_context_id: Option<String>,
     pub text_value: Option<String>,
     pub url_value: Option<String>,
     pub source_path: Option<String>,

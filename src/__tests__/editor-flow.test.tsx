@@ -8,6 +8,7 @@ const mockDeleteNote = vi.fn();
 const mockExportNotesMarkdown = vi.fn();
 const mockSaveNote = vi.fn();
 const mockOpenNote = vi.fn();
+const mockRenameTextContext = vi.fn();
 const mockSearchNotes = vi.fn();
 const mockPickImageFile = vi.fn();
 
@@ -15,6 +16,7 @@ vi.mock("../lib/tauri", () => ({
   bootstrapWorkspace: () => mockBootstrapWorkspace(),
   deleteNote: (noteId: string) => mockDeleteNote(noteId),
   exportNotesMarkdown: (noteIds: string[]) => mockExportNotesMarkdown(noteIds),
+  renameTextContext: (textContextId: string, label: string) => mockRenameTextContext(textContextId, label),
   saveNote: (input: unknown) => mockSaveNote(input),
   openNote: (noteId: string) => mockOpenNote(noteId),
   searchNotes: (query: string) => mockSearchNotes(query),
@@ -34,6 +36,7 @@ function makeWorkspacePayload() {
     placeholders: [],
     knownTextContexts: [],
     textContextRelationships: [],
+    editableTextContexts: [],
   };
 }
 
@@ -91,8 +94,50 @@ beforeEach(() => {
   mockExportNotesMarkdown.mockReset();
   mockSaveNote.mockReset();
   mockOpenNote.mockReset();
+  mockRenameTextContext.mockReset();
   mockSearchNotes.mockReset();
   mockPickImageFile.mockReset();
+});
+
+test("settings can rename a shared text context and refresh suggestions", async () => {
+  mockBootstrapWorkspace
+    .mockResolvedValueOnce({
+      history: [],
+      placeholders: [],
+      knownTextContexts: [{ label: "Cryptography", normalizedLabel: "cryptography", useCount: 2 }],
+      textContextRelationships: [],
+      editableTextContexts: [
+        { id: "ctx-1", label: "Cryptography", normalizedLabel: "cryptography", useCount: 2 },
+      ],
+    })
+    .mockResolvedValueOnce({
+      history: [],
+      placeholders: [],
+      knownTextContexts: [{ label: "Applied cryptography", normalizedLabel: "applied cryptography", useCount: 2 }],
+      textContextRelationships: [],
+      editableTextContexts: [
+        {
+          id: "ctx-1",
+          label: "Applied cryptography",
+          normalizedLabel: "applied cryptography",
+          useCount: 2,
+        },
+      ],
+    });
+  mockRenameTextContext.mockResolvedValue(undefined);
+
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+  fireEvent.change(await screen.findByDisplayValue("Cryptography"), {
+    target: { value: "Applied cryptography" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save context tag Cryptography" }));
+
+  await waitFor(() => {
+    expect(mockRenameTextContext).toHaveBeenCalledWith("ctx-1", "Applied cryptography");
+  });
+  expect(await screen.findByDisplayValue("Applied cryptography")).toBeInTheDocument();
 });
 
 test("draft supports text, url, and image capture contexts", async () => {

@@ -23,6 +23,15 @@ export async function searchNotes(query: string): Promise<NoteSearchResult[]> {
   return invoke<NoteSearchResult[]>("search_notes", { query });
 }
 
+export async function renameTextContext(textContextId: string, label: string): Promise<void> {
+  return invoke("rename_text_context", {
+    input: {
+      textContextId,
+      label,
+    },
+  });
+}
+
 export async function exportNotesMarkdown(noteIds: string[]): Promise<boolean> {
   const destinationPath = await save({
     defaultPath: "seton-notes-export.md",

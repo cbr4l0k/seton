@@ -349,13 +349,27 @@ textarea {
 }
 
 .settings-popover {
-  width: min(520px, calc(100vw - 64px));
+  width: min(880px, calc(100vw - 64px));
+  max-height: min(78vh, 760px);
   border: 1px solid var(--line-strong);
   border-radius: 0;
   background: rgba(243, 240, 232, 0.94);
   padding: 18px 20px 20px;
   box-shadow: none;
   z-index: 8;
+  overflow: auto;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.34fr) minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+
+.settings-column {
+  display: grid;
+  gap: 14px;
 }
 
 .settings-popover__header {
@@ -386,11 +400,89 @@ textarea {
 
 .settings-option {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   color: var(--ink);
   font-size: 11px;
   text-transform: uppercase;
+}
+
+.settings-section {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-section__count {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: rgba(23, 25, 28, 0.62);
+}
+
+.settings-tag-list {
+  display: grid;
+  gap: 0;
+  border-top: 1px solid rgba(23, 25, 28, 0.12);
+}
+
+.settings-tag-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 56px;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(23, 25, 28, 0.12);
+}
+
+.settings-tag-input,
+.settings-tag-save {
+  border-radius: 0;
+  color: var(--ink);
+  font: inherit;
+}
+
+.settings-tag-input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-bottom: 1px solid rgba(23, 25, 28, 0.22);
+  border-radius: 0;
+  background: transparent;
+  min-height: 36px;
+  padding: 0 2px;
+}
+
+.settings-tag-meta {
+  font-size: 12px;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--ink);
+}
+
+.settings-tag-save {
+  border: 0;
+  background: transparent;
+  min-height: 24px;
+  padding: 0;
+  text-transform: uppercase;
+  cursor: pointer;
+  letter-spacing: 0.08em;
+}
+
+.settings-tag-save:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+.settings-empty {
+  margin: 0;
+  font-size: 13px;
+  color: rgba(23, 25, 28, 0.62);
 }
 
 .panel {
@@ -986,7 +1078,24 @@ mark {
   }
 
   .settings-popover {
-    width: min(520px, calc(100vw - 32px));
+    width: min(880px, calc(100vw - 32px));
+    max-height: min(84vh, 760px);
+    padding: 16px;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
+    gap: 22px;
+  }
+
+  .settings-tag-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .settings-tag-save {
+    width: 100%;
+    text-align: left;
   }
 
   .ambient-ribbon--green {

@@ -12,11 +12,13 @@ import {
   deleteNote,
   exportNotesMarkdown,
   openNote,
+  renameTextContext,
   saveNote,
   searchNotes,
 } from "./lib/tauri";
 import type {
   CaptureContext,
+  EditableTextContext,
   KnownTextContext,
   NoteSearchResult,
   RecentNote,
@@ -41,10 +43,13 @@ export default function App() {
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const [knownTextContexts, setKnownTextContexts] = useState<KnownTextContext[]>([]);
   const [textContextRelationships, setTextContextRelationships] = useState<TextContextRelationship[]>([]);
+  const [editableTextContexts, setEditableTextContexts] = useState<EditableTextContext[]>([]);
+  const [textContextDrafts, setTextContextDrafts] = useState<Record<string, string>>({});
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
   const [currentNoteId, setCurrentNoteId] = useState<string | null>(null);
   const [requestAnalysisAfterSave, setRequestAnalysisAfterSave] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [savingTextContextId, setSavingTextContextId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const loadedSnapshot = useRef<LoadedDraftSnapshot>({
     noteId: null,
@@ -197,6 +202,10 @@ export default function App() {
       setHistoryItems(payload.history.map(formatHistoryItem));
       setKnownTextContexts(payload.knownTextContexts ?? []);
       setTextContextRelationships(payload.textContextRelationships ?? []);
+      setEditableTextContexts(payload.editableTextContexts ?? []);
+      setTextContextDrafts(
+        Object.fromEntries((payload.editableTextContexts ?? []).map((item) => [item.id, item.label])),
+      );
     } catch {
       if (isCancelled()) {
         return;
@@ -205,6 +214,25 @@ export default function App() {
       setHistoryItems([]);
       setKnownTextContexts([]);
       setTextContextRelationships([]);
+      setEditableTextContexts([]);
+      setTextContextDrafts({});
+    }
+  }
+
+  async function handleRenameTextContext(textContext: EditableTextContext) {
+    const nextLabel = (textContextDrafts[textContext.id] ?? textContext.label).trim();
+    if (!nextLabel || nextLabel === textContext.label) {
+      return;
+    }
+
+    setSavingTextContextId(textContext.id);
+
+    try {
+      await renameTextContext(textContext.id, nextLabel);
+      await loadWorkspaceData();
+      setToastMessage("renamed");
+    } finally {
+      setSavingTextContextId(null);
     }
   }
 
@@ -305,14 +333,65 @@ export default function App() {
               Workspace settings
             </h2>
 
-            <label className="settings-option">
-              <input
-                checked={requestAnalysisAfterSave}
-                type="checkbox"
-                onChange={(event) => setRequestAnalysisAfterSave(event.target.checked)}
-              />
-              <span>Request analysis after save</span>
-            </label>
+            <div className="settings-grid">
+              <section className="settings-column">
+                <p className="panel-subtle-title">General</p>
+                <label className="settings-option">
+                  <input
+                    checked={requestAnalysisAfterSave}
+                    type="checkbox"
+                    onChange={(event) => setRequestAnalysisAfterSave(event.target.checked)}
+                  />
+                  <span>Request analysis after save</span>
+                </label>
+              </section>
+
+              <section className="settings-section">
+                <div className="settings-section__header">
+                  <p className="panel-subtle-title">Context tags</p>
+                  <span className="settings-section__count">{editableTextContexts.length}</span>
+                </div>
+
+                {editableTextContexts.length > 0 ? (
+                  <div className="settings-tag-list">
+                    {editableTextContexts.map((textContext) => {
+                      const draftValue = textContextDrafts[textContext.id] ?? textContext.label;
+                      const saveDisabled =
+                        savingTextContextId === textContext.id ||
+                        draftValue.trim().length === 0 ||
+                        draftValue.trim() === textContext.label;
+
+                      return (
+                        <div key={textContext.id} className="settings-tag-row">
+                          <span className="settings-tag-meta">{textContext.useCount}</span>
+                          <input
+                            aria-label={`Context tag ${textContext.label}`}
+                            className="settings-tag-input"
+                            value={draftValue}
+                            onChange={(event) =>
+                              setTextContextDrafts((current) => ({
+                                ...current,
+                                [textContext.id]: event.target.value,
+                              }))}
+                          />
+                          <button
+                            aria-label={`Save context tag ${textContext.label}`}
+                            className="settings-tag-save"
+                            disabled={saveDisabled}
+                            type="button"
+                            onClick={() => void handleRenameTextContext(textContext)}
+                          >
+                            save
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="settings-empty">No saved context tags yet.</p>
+                )}
+              </section>
+            </div>
           </section>
         </div>
       ) : null}

@@ -10,8 +10,10 @@ vi.mock("../lib/tauri", () => ({
     placeholders: [],
     knownTextContexts: [],
     textContextRelationships: [],
+    editableTextContexts: [],
   }),
   deleteNote: vi.fn(),
+  renameTextContext: vi.fn(),
   saveNote: vi.fn(),
   openNote: vi.fn(),
   searchNotes: vi.fn().mockResolvedValue([]),
@@ -24,6 +26,7 @@ beforeEach(() => {
     placeholders: [],
     knownTextContexts: [],
     textContextRelationships: [],
+    editableTextContexts: [],
   });
   vi.mocked(searchNotes).mockResolvedValue([]);
 });
@@ -47,13 +50,24 @@ test("bundles Departure Mono from a local asset", () => {
   expect(departureMonoFontUrl).not.toContain("https://departuremono.com/");
 });
 
-test("opens settings as a dedicated front panel", () => {
+test("opens settings as a dedicated front panel", async () => {
+  vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+    editableTextContexts: [
+      { id: "ctx-1", label: "Cryptography", normalizedLabel: "cryptography", useCount: 2 },
+    ],
+  });
+
   render(<App />);
 
   fireEvent.click(screen.getByLabelText("Settings"));
 
   expect(screen.getByRole("dialog", { name: "Workspace settings" })).toBeInTheDocument();
   expect(screen.getByText("Workspace settings")).toBeInTheDocument();
+  expect(await screen.findByDisplayValue("Cryptography")).toBeInTheDocument();
 });
 
 test("arrow keys move between center and placeholder panels", () => {
@@ -105,6 +119,7 @@ test("bottom notes panel provides a focusable scroll region when notes overflow"
     placeholders: [],
     knownTextContexts: [],
     textContextRelationships: [],
+    editableTextContexts: [],
   });
 
   render(<App />);
@@ -131,6 +146,7 @@ test("inactive notes panel controls are removed from the tab order", async () =>
     placeholders: [],
     knownTextContexts: [],
     textContextRelationships: [],
+    editableTextContexts: [],
   });
 
   render(<App />);
@@ -169,6 +185,7 @@ test("notes panel renders a search field and requests matches", async () => {
     placeholders: [],
     knownTextContexts: [],
     textContextRelationships: [],
+    editableTextContexts: [],
   });
   vi.mocked(searchNotes).mockResolvedValueOnce([
     {
@@ -204,6 +221,7 @@ test("activating the notes panel focuses the notes search input", async () => {
     placeholders: [],
     knownTextContexts: [],
     textContextRelationships: [],
+    editableTextContexts: [],
   });
 
   render(<App />);

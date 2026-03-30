@@ -35,6 +35,13 @@ export type TextContextRelationship = {
   useCount: number;
 };
 
+export type EditableTextContext = {
+  id: string;
+  label: string;
+  normalizedLabel: string;
+  useCount: number;
+};
+
 export type CaptureContext =
   | {
       id: string;
@@ -90,4 +97,5 @@ export type WorkspacePayload = {
   placeholders: PlaceholderPanel[];
   knownTextContexts: KnownTextContext[];
   textContextRelationships: TextContextRelationship[];
+  editableTextContexts?: EditableTextContext[];
 };
