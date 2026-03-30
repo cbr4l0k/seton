@@ -11,6 +11,12 @@
     "tauri": "mkdir -p .tmp/rustc .tmp/cargo-target && TMPDIR=$PWD/.tmp/rustc CARGO_TARGET_DIR=$PWD/.tmp/cargo-target tauri"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.10.3",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.40.0",
+    "@lezer/highlight": "^1.2.3",
     "@tauri-apps/api": "^2.8.0",
     "@tauri-apps/plugin-dialog": "^2.4.0",
     "react": "^18.3.1",

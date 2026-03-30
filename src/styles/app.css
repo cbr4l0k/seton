@@ -525,25 +525,43 @@ textarea {
   filter: saturate(0.85);
 }
 
-.panel-center textarea {
+.panel-center .markdown-editor,
+.panel-center .cm-editor {
   width: 100%;
   min-height: min(400px, calc(100vh - 196px));
   flex: 1;
   box-sizing: border-box;
-  resize: none;
+}
+
+.panel-center .cm-editor {
   outline: none;
   border: 0;
   border-radius: 0;
   background: transparent;
   color: var(--ink);
-  padding: 10px 0 0;
-  font-size: 18px;
-  line-height: 30px;
-  caret-color: var(--accent);
   box-shadow: none;
 }
 
-.panel-center textarea::placeholder {
+.panel-center .cm-focused {
+  outline: none;
+}
+
+.panel-center .cm-scroller {
+  min-height: min(400px, calc(100vh - 196px));
+}
+
+.panel-center .cm-content,
+.panel-center .cm-placeholder {
+  padding: 10px 0 0;
+  font-size: 18px;
+  line-height: 30px;
+}
+
+.panel-center .cm-content {
+  caret-color: var(--accent);
+}
+
+.panel-center .cm-placeholder {
   color: rgba(23, 25, 28, 0.34);
 }
 

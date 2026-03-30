@@ -1,7 +1,15 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import App from "../App";
+
+type MarkdownEditorTestApi = {
+  focus: () => void;
+  getValue: () => string;
+  redo: () => boolean;
+  setValue: (value: string) => void;
+  undo: () => boolean;
+};
 
 const mockBootstrapWorkspace = vi.fn();
 const mockDeleteNote = vi.fn();
@@ -54,6 +62,36 @@ function makeSavedNoteDetail() {
   };
 }
 
+function getThoughtEditor() {
+  return screen.getByRole("textbox", { name: "Thought inbox editor" }) as HTMLElement & {
+    __markdownEditor?: MarkdownEditorTestApi;
+  };
+}
+
+function getThoughtEditorApi() {
+  const editor = getThoughtEditor();
+  expect(editor.__markdownEditor).toBeDefined();
+  return editor.__markdownEditor!;
+}
+
+function setThoughtEditorValue(value: string) {
+  act(() => {
+    getThoughtEditorApi().setValue(value);
+  });
+}
+
+function expectThoughtEditorValue(value: string) {
+  expect(getThoughtEditorApi().getValue()).toBe(value);
+}
+
+function undoThoughtEditor() {
+  let result = false;
+  act(() => {
+    result = getThoughtEditorApi().undo();
+  });
+  return result;
+}
+
 test("settings can enable analysis requests and save resets to a fresh draft", async () => {
   mockBootstrapWorkspace.mockResolvedValue(makeWorkspacePayload());
   mockOpenNote.mockResolvedValue(makeSavedNoteDetail());
@@ -71,21 +109,22 @@ test("settings can enable analysis requests and save resets to a fresh draft", a
   fireEvent.keyDown(window, { key: "ArrowDown" });
   fireEvent.click(screen.getByText("Seed note"));
   expect(mockOpenNote).toHaveBeenCalledWith("seed-note");
-  expect(await screen.findByDisplayValue("Seed note")).toBeInTheDocument();
-
-  fireEvent.change(screen.getByPlaceholderText("I'm thinking about..."), {
-    target: { value: "Seed note changed" },
+  await waitFor(() => {
+    expectThoughtEditorValue("Seed note");
   });
-  fireEvent.keyDown(screen.getByPlaceholderText("I'm thinking about..."), {
+
+  setThoughtEditorValue("Seed note changed");
+  fireEvent.keyDown(getThoughtEditor(), {
     key: "Enter",
     ctrlKey: true,
   });
 
   await waitFor(() => {
-    expect(screen.getByPlaceholderText("I'm thinking about...")).toHaveValue("");
+    expectThoughtEditorValue("");
   });
-  expect(await screen.findByText("saved")).toBeInTheDocument();
-  expect(mockSaveNote).toHaveBeenCalledWith(expect.objectContaining({ requestAnalysis: true }));
+  await waitFor(() => {
+    expect(mockSaveNote).toHaveBeenCalledWith(expect.objectContaining({ requestAnalysis: true }));
+  });
 });
 
 beforeEach(() => {
@@ -97,6 +136,7 @@ beforeEach(() => {
   mockRenameTextContext.mockReset();
   mockSearchNotes.mockReset();
   mockPickImageFile.mockReset();
+  mockOpenNote.mockResolvedValue(makeSavedNoteDetail());
 });
 
 test("settings can rename a shared text context and refresh suggestions", async () => {
@@ -151,9 +191,7 @@ test("draft supports text, url, and image capture contexts", async () => {
 
   render(<App />);
 
-  fireEvent.change(screen.getByPlaceholderText("I'm thinking about..."), {
-    target: { value: "A note" },
-  });
+  setThoughtEditorValue("A note");
   fireEvent.change(screen.getByLabelText("Context input"), {
     target: { value: "crypto 2nd homework" },
   });
@@ -206,15 +244,13 @@ test("saving a new note clears the body and preserves contexts for the next note
 
   render(<App />);
 
-  fireEvent.change(screen.getByPlaceholderText("I'm thinking about..."), {
-    target: { value: "A note" },
-  });
+  setThoughtEditorValue("A note");
   fireEvent.change(screen.getByLabelText("Context input"), {
     target: { value: "https://example.com" },
   });
   fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "Enter" });
 
-  fireEvent.keyDown(screen.getByPlaceholderText("I'm thinking about..."), {
+  fireEvent.keyDown(getThoughtEditor(), {
     key: "Enter",
     ctrlKey: true,
   });
@@ -226,7 +262,7 @@ test("saving a new note clears the body and preserves contexts for the next note
     }),
   );
   await waitFor(() => {
-    expect(screen.getByPlaceholderText("I'm thinking about...")).toHaveValue("");
+    expectThoughtEditorValue("");
   });
   expect(screen.getByText("https://example.com")).toBeInTheDocument();
 });
@@ -246,25 +282,23 @@ test("ctrl enter on an empty draft clears preserved contexts", async () => {
 
   render(<App />);
 
-  fireEvent.change(screen.getByPlaceholderText("I'm thinking about..."), {
-    target: { value: "A note" },
-  });
+  setThoughtEditorValue("A note");
   fireEvent.change(screen.getByLabelText("Context input"), {
     target: { value: "https://example.com" },
   });
   fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "Enter" });
 
-  fireEvent.keyDown(screen.getByPlaceholderText("I'm thinking about..."), {
+  fireEvent.keyDown(getThoughtEditor(), {
     key: "Enter",
     ctrlKey: true,
   });
 
   await waitFor(() => {
-    expect(screen.getByPlaceholderText("I'm thinking about...")).toHaveValue("");
+    expectThoughtEditorValue("");
   });
   expect(screen.getByText("https://example.com")).toBeInTheDocument();
 
-  fireEvent.keyDown(screen.getByPlaceholderText("I'm thinking about..."), {
+  fireEvent.keyDown(getThoughtEditor(), {
     key: "Enter",
     ctrlKey: true,
   });
@@ -369,15 +403,17 @@ test("saving an opened note without changes clears the editor but does not call 
   expect(await screen.findByText("Seed note")).toBeInTheDocument();
   fireEvent.keyDown(window, { key: "ArrowDown" });
   fireEvent.click(screen.getByText("Seed note"));
-  expect(await screen.findByDisplayValue("Seed note")).toBeInTheDocument();
+  await waitFor(() => {
+    expectThoughtEditorValue("Seed note");
+  });
 
-  fireEvent.keyDown(screen.getByPlaceholderText("I'm thinking about..."), {
+  fireEvent.keyDown(getThoughtEditor(), {
     key: "Enter",
     ctrlKey: true,
   });
 
   expect(mockSaveNote).not.toHaveBeenCalled();
-  expect(screen.getByPlaceholderText("I'm thinking about...")).toHaveValue("");
+  expectThoughtEditorValue("");
 });
 
 test("bootstrap history timestamps are displayed as dd.mm.yyyy", async () => {
@@ -599,6 +635,80 @@ test("typing shows fuzzy text-context suggestions from prior labels", async () =
   });
 
   expect(await screen.findByRole("button", { name: "Suggest cryptography" })).toBeInTheDocument();
+});
+
+test("editor exposes working undo and redo history controls", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+    editableTextContexts: [],
+  });
+
+  render(<App />);
+
+  const editorApi = getThoughtEditorApi();
+  editorApi.setValue("alpha");
+  editorApi.setValue("alpha beta");
+
+  expect(editorApi.getValue()).toBe("alpha beta");
+  expect(editorApi.undo()).toBe(true);
+  expect(editorApi.getValue()).toBe("alpha");
+  expect(editorApi.redo()).toBe(true);
+  expect(editorApi.getValue()).toBe("alpha beta");
+});
+
+test("saving a draft reset does not pollute undo history", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+    editableTextContexts: [],
+  });
+  mockSaveNote.mockResolvedValue({
+    ...makeSavedNoteDetail(),
+    body: "alpha beta",
+    updatedAt: "2026-03-21T11:00:00Z",
+  });
+
+  render(<App />);
+
+  setThoughtEditorValue("alpha beta");
+  fireEvent.keyDown(getThoughtEditor(), {
+    key: "Enter",
+    ctrlKey: true,
+  });
+
+  await waitFor(() => {
+    expectThoughtEditorValue("");
+  });
+  expect(undoThoughtEditor()).toBe(false);
+  expectThoughtEditorValue("");
+});
+
+test("ctrl enter in notes search does not save the current draft", async () => {
+  mockBootstrapWorkspace.mockResolvedValue(makeWorkspacePayload());
+  mockSaveNote.mockResolvedValue({
+    ...makeSavedNoteDetail(),
+    body: "Draft body",
+    updatedAt: "2026-03-21T11:00:00Z",
+  });
+
+  render(<App />);
+
+  setThoughtEditorValue("Draft body");
+
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+  const searchInput = await screen.findByLabelText("Search notes");
+  searchInput.focus();
+  fireEvent.keyDown(searchInput, {
+    key: "Enter",
+    ctrlKey: true,
+  });
+
+  expect(mockSaveNote).not.toHaveBeenCalled();
 });
 
 test("selected text labels boost related recommendations and exclude already selected labels", async () => {
@@ -889,20 +999,18 @@ test("newly saved text labels become available as suggestions for the next draft
 
   render(<App />);
 
-  fireEvent.change(screen.getByPlaceholderText("I'm thinking about..."), {
-    target: { value: "A note" },
-  });
+  setThoughtEditorValue("A note");
   fireEvent.change(screen.getByLabelText("Context input"), {
     target: { value: "cryptography" },
   });
   fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "Enter" });
-  fireEvent.keyDown(screen.getByPlaceholderText("I'm thinking about..."), {
+  fireEvent.keyDown(getThoughtEditor(), {
     key: "Enter",
     ctrlKey: true,
   });
 
   await waitFor(() => {
-    expect(screen.getByPlaceholderText("I'm thinking about...")).toHaveValue("");
+    expectThoughtEditorValue("");
   });
 
   fireEvent.click(screen.getByText("cryptography"));

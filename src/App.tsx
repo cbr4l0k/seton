@@ -2,6 +2,7 @@ import "./styles/app.css";
 import { useEffect, useRef, useState } from "react";
 
 import { CenterEditorPanel } from "./components/CenterEditorPanel";
+import type { MarkdownEditorHandle } from "./components/MarkdownEditor";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { PlaceholderPanel } from "./components/PlaceholderPanel";
 import { WorkspaceCanvas } from "./components/WorkspaceCanvas";
@@ -33,7 +34,7 @@ type LoadedDraftSnapshot = {
 };
 
 export default function App() {
-  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<MarkdownEditorHandle | null>(null);
   const { position, setPosition } = useSpatialNavigation();
   const [body, setBody] = useState("");
   const [contexts, setContexts] = useState<DraftCaptureContext[]>([]);
@@ -116,8 +117,12 @@ export default function App() {
   }, [searchQuery]);
 
   useEffect(() => {
+    function isEditorSaveTarget(target: EventTarget | null) {
+      return target instanceof HTMLElement && target.closest(".markdown-editor, textarea") !== null;
+    }
+
     function handleKeyDown(event: KeyboardEvent) {
-      if (!(event.ctrlKey || event.metaKey) || event.key !== "Enter") {
+      if (!(event.ctrlKey || event.metaKey) || event.key !== "Enter" || !isEditorSaveTarget(event.target)) {
         return;
       }
 
@@ -125,8 +130,8 @@ export default function App() {
       void attemptSave();
     }
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
   });
 
   function syncLoadedSnapshot(nextNoteId: string | null, nextBody: string, nextContexts: DraftCaptureContext[]) {

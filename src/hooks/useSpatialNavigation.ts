@@ -21,7 +21,8 @@ export function useSpatialNavigation(initialPosition: WorkspacePosition = "cente
       return (
         target instanceof HTMLTextAreaElement ||
         target instanceof HTMLInputElement ||
-        target.isContentEditable
+        target.isContentEditable ||
+        target.closest(".cm-editor") !== null
       );
     }
 

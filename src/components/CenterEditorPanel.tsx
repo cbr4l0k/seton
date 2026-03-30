@@ -1,10 +1,11 @@
-import type { RefObject } from "react";
+import type { Ref } from "react";
 import type { KnownTextContext, TextContextRelationship } from "../lib/types";
 
 import {
   CaptureContextEditor,
   type DraftCaptureContext,
 } from "./CaptureContextEditor";
+import { MarkdownEditor, type MarkdownEditorHandle } from "./MarkdownEditor";
 
 type CenterEditorPanelProps = {
   body: string;
@@ -14,7 +15,7 @@ type CenterEditorPanelProps = {
   knownTextContexts: KnownTextContext[];
   textContextRelationships: TextContextRelationship[];
   active: boolean;
-  editorRef: RefObject<HTMLTextAreaElement>;
+  editorRef: Ref<MarkdownEditorHandle>;
 };
 
 export function CenterEditorPanel({
@@ -27,16 +28,7 @@ export function CenterEditorPanel({
   active,
   editorRef,
 }: CenterEditorPanelProps) {
-  function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
-    const items = Array.from(event.clipboardData.items);
-    const imageItem = items.find((item) => item.type.startsWith("image/"));
-    if (!imageItem) {
-      return;
-    }
-
-    event.preventDefault();
-    const file = imageItem.getAsFile();
-    const label = file?.name || "Pasted image";
+  function handlePasteImage(label: string) {
     if (
       contexts.some(
         (context) =>
@@ -65,15 +57,14 @@ export function CenterEditorPanel({
       data-active={active}
       data-dimmed={!active}
     >
-      <textarea
-        disabled={!active}
-        ref={editorRef}
-        autoFocus
+      <MarkdownEditor
+        active={active}
+        ariaLabel="Thought inbox editor"
+        onChange={onBodyChange}
+        onPasteImage={handlePasteImage}
         placeholder="I'm thinking about..."
-        aria-label="Thought inbox editor"
+        ref={editorRef}
         value={body}
-        onChange={(event) => onBodyChange(event.target.value)}
-        onPaste={handlePaste}
       />
 
       <CaptureContextEditor

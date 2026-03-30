@@ -1,8 +1,12 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import App from "../App";
 import departureMonoFontUrl from "../assets/fonts/DepartureMono-Regular.woff2?url";
 import { bootstrapWorkspace, searchNotes } from "../lib/tauri";
+
+type MarkdownEditorTestApi = {
+  focus: () => void;
+};
 
 vi.mock("../lib/tauri", () => ({
   bootstrapWorkspace: vi.fn().mockResolvedValue({
@@ -31,9 +35,23 @@ beforeEach(() => {
   vi.mocked(searchNotes).mockResolvedValue([]);
 });
 
+function getThoughtEditor() {
+  return screen.getByRole("textbox", { name: "Thought inbox editor" }) as HTMLElement & {
+    __markdownEditor?: MarkdownEditorTestApi;
+  };
+}
+
+function focusThoughtEditor() {
+  const editor = getThoughtEditor();
+  act(() => {
+    editor.__markdownEditor?.focus();
+  });
+  return editor;
+}
+
 test("renders the Thought Inbox shell", () => {
   render(<App />);
-  expect(screen.getByPlaceholderText("I'm thinking about...")).toBeInTheDocument();
+  expect(getThoughtEditor()).toBeInTheDocument();
   expect(screen.getByLabelText("Notes panel")).toHaveAttribute("data-active", "false");
 });
 
@@ -80,14 +98,13 @@ test("arrow keys move between center and placeholder panels", () => {
   expect(screen.getByLabelText("Notes panel")).toHaveAttribute("data-active", "true");
 
   fireEvent.keyDown(window, { key: "Escape" });
-  expect(screen.getByPlaceholderText("I'm thinking about...")).toHaveFocus();
+  expect(getThoughtEditor()).toHaveFocus();
 });
 
 test("arrow keys inside the editor do not navigate panels", () => {
   render(<App />);
 
-  const editor = screen.getByPlaceholderText("I'm thinking about...");
-  editor.focus();
+  const editor = focusThoughtEditor();
 
   fireEvent.keyDown(editor, { key: "ArrowDown" });
 
@@ -98,8 +115,7 @@ test("arrow keys inside the editor do not navigate panels", () => {
 test("escape inside the editor blurs before panel navigation resumes", () => {
   render(<App />);
 
-  const editor = screen.getByPlaceholderText("I'm thinking about...");
-  editor.focus();
+  const editor = focusThoughtEditor();
 
   fireEvent.keyDown(editor, { key: "Escape" });
   expect(editor).not.toHaveFocus();
