@@ -533,7 +533,13 @@ textarea {
   box-sizing: border-box;
 }
 
+.panel-center .markdown-editor {
+  min-height: 0;
+  overflow: hidden;
+}
+
 .panel-center .cm-editor {
+  max-height: min(400px, calc(100vh - 196px));
   outline: none;
   border: 0;
   border-radius: 0;
@@ -548,6 +554,9 @@ textarea {
 
 .panel-center .cm-scroller {
   min-height: min(400px, calc(100vh - 196px));
+  max-height: min(400px, calc(100vh - 196px));
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .panel-center .cm-content,
