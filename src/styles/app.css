@@ -681,9 +681,8 @@ textarea {
 }
 
 .history-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 16px;
   width: 100%;
   border: 0;
@@ -696,16 +695,26 @@ textarea {
   overflow: hidden;
 }
 
+.history-item[data-active="true"] {
+  background: rgba(35, 139, 99, 0.06);
+  outline: 1px solid rgba(35, 139, 99, 0.35);
+  outline-offset: 0;
+}
+
 .history-item time {
   color: var(--muted);
   white-space: nowrap;
   font-size: 11px;
 }
 
-.history-item span {
+.history-item__content {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.history-item .history-search-result__tags {
+  grid-column: 1 / -1;
 }
 
 .history-export {

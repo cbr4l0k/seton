@@ -11,6 +11,16 @@ type SearchResultItem = {
   matchedTags: { text: string }[];
 };
 
+type VisibleHistoryItem = {
+  id: string;
+  preview: string;
+  updatedAt: string;
+  matchedTags: { text: string }[];
+  openLabel: string;
+  selectionLabel: string;
+  deleteLabel: string;
+};
+
 type HistoryPanelProps = {
   searchQuery: string;
   searchResults: SearchResultItem[];
@@ -40,31 +50,57 @@ export function HistoryPanel({
   onSearchActiveIndexChange,
   onSelectionChange,
 }: HistoryPanelProps) {
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const selected = new Set(selectedNoteIds);
   const showingSearchResults = searchQuery.trim().length > 0;
+  const visibleItems: VisibleHistoryItem[] = showingSearchResults
+    ? searchResults.map((item, index) => ({
+        id: item.id,
+        preview: item.preview,
+        updatedAt: item.updatedAt,
+        matchedTags: item.matchedTags,
+        openLabel: `Open note ${index + 1}`,
+        selectionLabel: `Select search result ${index + 1}`,
+        deleteLabel: `Delete search result ${index + 1}`,
+      }))
+    : items.map((item) => ({
+        id: item.id,
+        preview: item.preview,
+        updatedAt: item.updatedAt,
+        matchedTags: [],
+        openLabel: `Open note ${item.preview}`,
+        selectionLabel: `Select ${item.preview}`,
+        deleteLabel: `Delete ${item.preview}`,
+      }));
+
+  useEffect(() => {
+    if (active) {
+      searchInputRef.current?.focus();
+    }
+  }, [active]);
 
   function handleSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
-    if (!showingSearchResults || searchResults.length === 0) {
+    if (visibleItems.length === 0) {
       return;
     }
 
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      onSearchActiveIndexChange((activeSearchIndex + 1) % searchResults.length);
+      onSearchActiveIndexChange((activeSearchIndex + 1) % visibleItems.length);
       return;
     }
 
     if (event.key === "ArrowUp") {
       event.preventDefault();
       onSearchActiveIndexChange(
-        (activeSearchIndex - 1 + searchResults.length) % searchResults.length,
+        (activeSearchIndex - 1 + visibleItems.length) % visibleItems.length,
       );
       return;
     }
 
     if (event.key === "Enter") {
       event.preventDefault();
-      const activeResult = searchResults[activeSearchIndex] ?? searchResults[0];
+      const activeResult = visibleItems[activeSearchIndex] ?? visibleItems[0];
       if (activeResult) {
         onOpen(activeResult.id);
       }
@@ -86,6 +122,7 @@ export function HistoryPanel({
           <input
             aria-label="Search notes"
             disabled={!active}
+            ref={searchInputRef}
             type="search"
             value={searchQuery}
             onChange={(event) => onSearchQueryChange(event.target.value)}
@@ -95,56 +132,21 @@ export function HistoryPanel({
         <button
           className="history-export"
           type="button"
-          disabled={!active || selected.size === 0 || showingSearchResults}
+          disabled={!active || selected.size === 0}
           onClick={onExport}
         >
           Export selected
         </button>
       </div>
-      {showingSearchResults ? (
+      {visibleItems.length > 0 ? (
         <div aria-label="Notes list" className="history-scroll-region" tabIndex={active ? 0 : -1}>
           <ul className="history-list">
-            {searchResults.map((item, index) => (
-              <li key={item.id}>
-                <button
-                  aria-label={`Open search result ${index + 1}`}
-                  className="history-search-result"
-                  data-active={active && index === activeSearchIndex}
-                  disabled={!active}
-                  type="button"
-                  onMouseEnter={() => onSearchActiveIndexChange(index)}
-                  onClick={() => onOpen(item.id)}
-                >
-                  <span
-                    className="history-search-result__preview"
-                    dangerouslySetInnerHTML={{ __html: item.preview }}
-                  />
-                  {item.matchedTags.length > 0 ? (
-                    <span className="history-search-result__tags">
-                      {item.matchedTags.map((tag) => (
-                        <span
-                          key={`${item.id}-${tag.text}`}
-                          className="history-search-result__tag"
-                          dangerouslySetInnerHTML={{ __html: tag.text }}
-                        />
-                      ))}
-                    </span>
-                  ) : null}
-                  <time>{item.updatedAt}</time>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : items.length > 0 ? (
-        <div aria-label="Notes list" className="history-scroll-region" tabIndex={active ? 0 : -1}>
-          <ul className="history-list">
-            {items.map((item) => (
+            {visibleItems.map((item, index) => (
               <li key={item.id}>
                 <div className="history-row">
                   <label className="history-select">
                     <input
-                      aria-label={`Select ${item.preview}`}
+                      aria-label={item.selectionLabel}
                       checked={selected.has(item.id)}
                       disabled={!active}
                       type="checkbox"
@@ -152,16 +154,33 @@ export function HistoryPanel({
                     />
                   </label>
                   <button
+                    aria-label={item.openLabel}
                     className="history-item"
+                    data-active={active && index === activeSearchIndex}
                     disabled={!active}
                     type="button"
+                    onMouseEnter={() => onSearchActiveIndexChange(index)}
                     onClick={() => onOpen(item.id)}
                   >
-                    <span>{item.preview}</span>
+                    <span
+                      className="history-item__content"
+                      dangerouslySetInnerHTML={{ __html: item.preview }}
+                    />
+                    {item.matchedTags.length > 0 ? (
+                      <span className="history-search-result__tags">
+                        {item.matchedTags.map((tag) => (
+                          <span
+                            key={`${item.id}-${tag.text}`}
+                            className="history-search-result__tag"
+                            dangerouslySetInnerHTML={{ __html: tag.text }}
+                          />
+                        ))}
+                      </span>
+                    ) : null}
                     <time>{item.updatedAt}</time>
                   </button>
                   <button
-                    aria-label={`Delete ${item.preview}`}
+                    aria-label={item.deleteLabel}
                     className="history-delete"
                     disabled={!active}
                     type="button"
@@ -178,3 +197,4 @@ export function HistoryPanel({
     </section>
   );
 }
+import { useEffect, useRef } from "react";

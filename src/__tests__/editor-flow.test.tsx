@@ -186,6 +186,50 @@ test("saving a new note clears the body and preserves contexts for the next note
   expect(screen.getByText("https://example.com")).toBeInTheDocument();
 });
 
+test("ctrl enter on an empty draft clears preserved contexts", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
+  mockSaveNote.mockResolvedValue({
+    ...makeSavedNoteDetail(),
+    body: "A note",
+    updatedAt: "2026-03-21T11:00:00Z",
+  });
+
+  render(<App />);
+
+  fireEvent.change(screen.getByPlaceholderText("I'm thinking about..."), {
+    target: { value: "A note" },
+  });
+  fireEvent.change(screen.getByLabelText("Context input"), {
+    target: { value: "https://example.com" },
+  });
+  fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "Enter" });
+
+  fireEvent.keyDown(screen.getByPlaceholderText("I'm thinking about..."), {
+    key: "Enter",
+    ctrlKey: true,
+  });
+
+  await waitFor(() => {
+    expect(screen.getByPlaceholderText("I'm thinking about...")).toHaveValue("");
+  });
+  expect(screen.getByText("https://example.com")).toBeInTheDocument();
+
+  fireEvent.keyDown(screen.getByPlaceholderText("I'm thinking about..."), {
+    key: "Enter",
+    ctrlKey: true,
+  });
+
+  await waitFor(() => {
+    expect(screen.queryByText("https://example.com")).not.toBeInTheDocument();
+  });
+  expect(mockSaveNote).toHaveBeenCalledTimes(1);
+});
+
 test("history items can be deleted", async () => {
   mockBootstrapWorkspace.mockResolvedValue(makeWorkspacePayload());
   mockDeleteNote.mockResolvedValue(undefined);

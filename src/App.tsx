@@ -149,6 +149,7 @@ export default function App() {
   async function handleDeleteNote(noteId: string) {
     await deleteNote(noteId);
     setHistoryItems((current) => current.filter((item) => item.id !== noteId));
+    setSearchResults((current) => current.filter((item) => item.id !== noteId));
     setSelectedNoteIds((current) => current.filter((id) => id !== noteId));
 
     if (currentNoteId === noteId) {
@@ -216,17 +217,20 @@ export default function App() {
     );
   }
 
-  function clearEditor() {
-    const preservedContexts = contexts;
+  function clearEditor(options: { clearContexts?: boolean } = {}) {
+    const nextContexts = options.clearContexts ? [] : contexts;
     setCurrentNoteId(null);
     setBody("");
-    setContexts(preservedContexts);
-    syncLoadedSnapshot(null, "", preservedContexts);
+    setContexts(nextContexts);
+    syncLoadedSnapshot(null, "", nextContexts);
     setPosition("center");
   }
 
   async function attemptSave() {
     if (!body.trim()) {
+      if (contexts.length > 0) {
+        clearEditor({ clearContexts: true });
+      }
       return;
     }
 
@@ -239,9 +243,7 @@ export default function App() {
   }
 
   async function handleExportSelectedNotes() {
-    const noteIds = historyItems
-      .filter((item) => selectedNoteIds.includes(item.id))
-      .map((item) => item.id);
+    const noteIds = [...selectedNoteIds];
 
     if (noteIds.length === 0) {
       return;

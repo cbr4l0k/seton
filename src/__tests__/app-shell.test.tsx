@@ -190,3 +190,25 @@ test("notes panel renders a search field and requests matches", async () => {
   expect(searchNotes).toHaveBeenCalledWith("crypto");
   expect((await screen.findAllByText("crypto", { selector: "mark" })).length).toBeGreaterThan(0);
 });
+
+test("activating the notes panel focuses the notes search input", async () => {
+  vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
+    history: [
+      {
+        id: "note-1",
+        preview: "Existing note",
+        lastOpenedAt: null,
+        updatedAt: "2026-03-24T10:00:00Z",
+      },
+    ],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
+
+  render(<App />);
+
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+
+  expect(await screen.findByLabelText("Search notes")).toHaveFocus();
+});
