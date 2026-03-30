@@ -233,6 +233,44 @@ test("selected notes can be exported as markdown", async () => {
   expect(mockExportNotesMarkdown).toHaveBeenCalledWith(["older-note", "newer-note"]);
 });
 
+test("up down and enter navigate and open recent notes from the notes panel", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [
+      {
+        id: "older-note",
+        preview: "Older note",
+        lastOpenedAt: null,
+        updatedAt: "2026-03-20T10:00:00Z",
+      },
+      {
+        id: "newer-note",
+        preview: "Newer note",
+        lastOpenedAt: null,
+        updatedAt: "2026-03-21T10:00:00Z",
+      },
+    ],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
+  mockOpenNote.mockResolvedValue(makeSavedNoteDetail());
+
+  render(<App />);
+
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+  const searchInput = await screen.findByLabelText("Search notes");
+  fireEvent.keyDown(searchInput, { key: "ArrowDown" });
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: "Open note Newer note" })).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+  });
+  fireEvent.keyDown(searchInput, { key: "Enter" });
+
+  expect(mockOpenNote).toHaveBeenCalledWith("newer-note");
+});
+
 test("saving an opened note without changes clears the editor but does not call saveNote", async () => {
   mockBootstrapWorkspace.mockResolvedValue(makeWorkspacePayload());
   mockOpenNote.mockResolvedValue(makeSavedNoteDetail());
@@ -299,11 +337,49 @@ test("up down and enter navigate and open search results from the notes panel", 
   fireEvent.change(await screen.findByLabelText("Search notes"), {
     target: { value: "crypto" },
   });
-  await screen.findByRole("button", { name: "Open search result 2" });
+  await screen.findByRole("button", { name: "Open note 2" });
   fireEvent.keyDown(screen.getByLabelText("Search notes"), { key: "ArrowDown" });
   fireEvent.keyDown(screen.getByLabelText("Search notes"), { key: "Enter" });
 
   expect(mockOpenNote).toHaveBeenCalledWith("note-b");
+});
+
+test("search results can still be selected exported and deleted", async () => {
+  mockBootstrapWorkspace.mockResolvedValue(makeWorkspacePayload());
+  mockSearchNotes.mockResolvedValue([
+    {
+      id: "note-a",
+      preview: "<mark>Crypto</mark> A",
+      matchedTags: [{ text: "algebra" }],
+      lastOpenedAt: null,
+      updatedAt: "2026-03-29T10:00:00Z",
+    },
+    {
+      id: "note-b",
+      preview: "<mark>Crypto</mark> B",
+      matchedTags: [{ text: "geometry" }],
+      lastOpenedAt: null,
+      updatedAt: "2026-03-28T10:00:00Z",
+    },
+  ]);
+  mockDeleteNote.mockResolvedValue(undefined);
+  mockExportNotesMarkdown.mockResolvedValue(undefined);
+
+  render(<App />);
+
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+  fireEvent.change(await screen.findByLabelText("Search notes"), {
+    target: { value: "crypto" },
+  });
+  await screen.findByRole("button", { name: "Open note 2" });
+
+  fireEvent.click(screen.getByLabelText("Select search result 1"));
+  fireEvent.click(screen.getByLabelText("Select search result 2"));
+  fireEvent.click(screen.getByRole("button", { name: "Export selected" }));
+  fireEvent.click(screen.getByRole("button", { name: "Delete search result 2" }));
+
+  expect(mockExportNotesMarkdown).toHaveBeenCalledWith(["note-a", "note-b"]);
+  expect(mockDeleteNote).toHaveBeenCalledWith("note-b");
 });
 
 test("ArrowRight advances from the create entry to the first suggestion, then to the next", async () => {
