@@ -30,7 +30,9 @@ pub fn run() {
             commands::workspace::delete_note,
             commands::workspace::search_notes,
             commands::workspace::rename_text_context,
-            commands::workspace::export_notes_markdown
+            commands::workspace::export_notes_markdown,
+            commands::workspace::refresh_failed_url_titles,
+            commands::workspace::refresh_all_url_titles
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

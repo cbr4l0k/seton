@@ -195,11 +195,12 @@ test("settings can retry failed and all saved url title fetches", async () => {
 
   fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
   fireEvent.click(screen.getByRole("button", { name: "Retry failed URL titles" }));
-  fireEvent.click(screen.getByRole("button", { name: "Refetch all URL titles" }));
 
   await waitFor(() => {
     expect(mockRefreshFailedUrlTitles).toHaveBeenCalledTimes(1);
   });
+
+  fireEvent.click(screen.getByRole("button", { name: "Refetch all URL titles" }));
   await waitFor(() => {
     expect(mockRefreshAllUrlTitles).toHaveBeenCalledTimes(1);
   });
@@ -225,6 +226,7 @@ test("opened notes display the fetched title for url contexts", async () => {
   render(<App />);
 
   expect(await screen.findByText("Seed note")).toBeInTheDocument();
+  fireEvent.keyDown(window, { key: "ArrowDown" });
   fireEvent.click(screen.getByText("Seed note"));
 
   expect(await screen.findByText("Example Article")).toBeInTheDocument();

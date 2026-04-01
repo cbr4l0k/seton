@@ -6,7 +6,7 @@ import { pickImageFile } from "../lib/tauri";
 
 export type DraftCaptureContext =
   | { id: string; kind: "text"; value: string }
-  | { id: string; kind: "url"; value: string }
+  | { id: string; kind: "url"; url: string; label: string }
   | { id: string; kind: "image"; sourcePath: string | null; label: string };
 
 type CaptureContextEditorProps = {
@@ -89,8 +89,9 @@ export function CaptureContextEditor({
     onChange(
       appendUniqueContext(contexts, {
         id: crypto.randomUUID(),
-        kind: URL_PATTERN.test(value) ? "url" : "text",
-        value,
+        ...(URL_PATTERN.test(value)
+          ? { kind: "url" as const, url: value, label: value }
+          : { kind: "text" as const, value }),
       }),
     );
     setDraft("");
@@ -259,6 +260,10 @@ function appendUniqueContext(
 function contextKey(context: DraftCaptureContext) {
   if (context.kind === "image") {
     return `image:${(context.sourcePath ?? context.label).trim().toLowerCase()}`;
+  }
+
+  if (context.kind === "url") {
+    return `url:${context.url.trim().toLowerCase()}`;
   }
 
   return `${context.kind}:${context.value.trim().toLowerCase()}`;

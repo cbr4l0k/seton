@@ -1,8 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ffi::OsStr;
+use std::future::Future;
 use std::path::Path;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use chrono::Utc;
+use reqwest::header::CONTENT_TYPE;
 use sha2::{Digest, Sha256};
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 use uuid::Uuid;
@@ -15,6 +19,7 @@ use crate::domain::note::{AnalysisStatus, MatchedTag, NoteDetail, NoteSearchResu
 pub struct NoteRepository {
     pool: SqlitePool,
     paths: AppPaths,
+    url_title_fetcher: Arc<dyn UrlTitleFetcher>,
 }
 
 pub struct SaveNoteInput {
@@ -53,7 +58,19 @@ pub struct TextContextSuggestionData {
 
 impl NoteRepository {
     pub fn new(pool: SqlitePool, paths: AppPaths) -> Self {
-        Self { pool, paths }
+        Self::new_with_url_title_fetcher(pool, paths, Arc::new(HttpUrlTitleFetcher::default()))
+    }
+
+    pub(crate) fn new_with_url_title_fetcher(
+        pool: SqlitePool,
+        paths: AppPaths,
+        url_title_fetcher: Arc<dyn UrlTitleFetcher>,
+    ) -> Self {
+        Self {
+            pool,
+            paths,
+            url_title_fetcher,
+        }
     }
 
     pub async fn save_note(&self, input: SaveNoteInput) -> Result<NoteDetail, String> {
@@ -123,14 +140,20 @@ impl NoteRepository {
         }
 
         for context in &input.capture_contexts {
-            let persisted = persist_capture_context(&self.paths, &mut *tx, &note_id, context)
+            let persisted = persist_capture_context(
+                &self.paths,
+                &self.url_title_fetcher,
+                &mut *tx,
+                &note_id,
+                context,
+            )
                 .await
                 .map_err(|err| err.to_string())?;
 
             sqlx::query(
                 "INSERT INTO capture_contexts (
-                    id, note_id, context_type, text_context_id, text_value, url_value, source_path, managed_path, created_at, updated_at
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    id, note_id, context_type, text_context_id, text_value, url_value, url_label, url_title_status, url_title_error, url_title_fetched_at, source_path, managed_path, created_at, updated_at
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&persisted.id)
             .bind(&persisted.note_id)
@@ -138,6 +161,10 @@ impl NoteRepository {
             .bind(persisted.text_context_id.as_deref())
             .bind(persisted.text_value.as_deref())
             .bind(persisted.url_value.as_deref())
+            .bind(persisted.display_label.as_deref())
+            .bind(persisted.url_title_status.as_deref())
+            .bind(persisted.url_title_error.as_deref())
+            .bind(persisted.url_title_fetched_at.as_deref())
             .bind(persisted.source_path.as_deref())
             .bind(persisted.managed_path.as_deref())
             .bind(&persisted.created_at)
@@ -178,6 +205,10 @@ impl NoteRepository {
                 capture_contexts.text_context_id,
                 COALESCE(text_contexts.label, capture_contexts.text_value) AS text_value,
                 capture_contexts.url_value,
+                capture_contexts.url_label,
+                capture_contexts.url_title_status,
+                capture_contexts.url_title_error,
+                capture_contexts.url_title_fetched_at,
                 capture_contexts.source_path,
                 capture_contexts.managed_path,
                 capture_contexts.created_at,
@@ -483,6 +514,14 @@ impl NoteRepository {
         tx.commit().await.map_err(|err| err.to_string())
     }
 
+    pub async fn refresh_failed_url_titles(&self) -> Result<(), String> {
+        self.refresh_url_titles(UrlTitleRefreshScope::Failed).await
+    }
+
+    pub async fn refresh_all_url_titles(&self) -> Result<(), String> {
+        self.refresh_url_titles(UrlTitleRefreshScope::All).await
+    }
+
     pub async fn export_notes_markdown(&self, note_ids: Vec<String>) -> Result<String, String> {
         if note_ids.is_empty() {
             return Err("at least one note must be selected".into());
@@ -514,6 +553,10 @@ impl NoteRepository {
                     capture_contexts.text_context_id,
                     COALESCE(text_contexts.label, capture_contexts.text_value) AS text_value,
                     capture_contexts.url_value,
+                    capture_contexts.url_label,
+                    capture_contexts.url_title_status,
+                    capture_contexts.url_title_error,
+                    capture_contexts.url_title_fetched_at,
                     capture_contexts.source_path,
                     capture_contexts.managed_path,
                     capture_contexts.created_at,
@@ -548,6 +591,56 @@ impl NoteRepository {
         .await
         .map_err(|err| err.to_string())
     }
+
+    async fn refresh_url_titles(&self, scope: UrlTitleRefreshScope) -> Result<(), String> {
+        let mut tx = self.pool.begin().await.map_err(|err| err.to_string())?;
+        let rows: Vec<(String,)> = sqlx::query_as(match scope {
+            UrlTitleRefreshScope::Failed => {
+                "SELECT DISTINCT url_value
+                 FROM capture_contexts
+                 WHERE context_type = 'url'
+                   AND url_value IS NOT NULL
+                   AND COALESCE(url_title_status, '') != 'resolved'"
+            }
+            UrlTitleRefreshScope::All => {
+                "SELECT DISTINCT url_value
+                 FROM capture_contexts
+                 WHERE context_type = 'url'
+                   AND url_value IS NOT NULL"
+            }
+        })
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|err| err.to_string())?;
+
+        for (url,) in rows {
+            let metadata = fetch_url_metadata(&*self.url_title_fetcher, &url).await;
+            apply_url_metadata_to_existing_contexts(&mut *tx, &url, &metadata).await?;
+        }
+
+        let affected_notes: Vec<(String, String)> = sqlx::query_as(
+            "SELECT notes.id, notes.body
+             FROM notes
+             JOIN capture_contexts ON capture_contexts.note_id = notes.id
+             WHERE capture_contexts.context_type = 'url'
+             GROUP BY notes.id, notes.body",
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|err| err.to_string())?;
+
+        for (note_id, body) in affected_notes {
+            upsert_note_search_index(&mut *tx, &note_id, &body).await?;
+        }
+
+        tx.commit().await.map_err(|err| err.to_string())
+    }
+}
+
+#[derive(Clone, Copy)]
+enum UrlTitleRefreshScope {
+    Failed,
+    All,
 }
 
 #[derive(sqlx::FromRow)]
@@ -570,6 +663,10 @@ struct CaptureContextRow {
     text_context_id: Option<String>,
     text_value: Option<String>,
     url_value: Option<String>,
+    url_label: Option<String>,
+    url_title_status: Option<String>,
+    url_title_error: Option<String>,
+    url_title_fetched_at: Option<String>,
     source_path: Option<String>,
     managed_path: Option<String>,
     created_at: String,
@@ -585,6 +682,10 @@ impl CaptureContextRow {
             text_context_id: self.text_context_id,
             text_value: self.text_value,
             url_value: self.url_value,
+            display_label: self.url_label,
+            url_title_status: self.url_title_status,
+            url_title_error: self.url_title_error,
+            url_title_fetched_at: self.url_title_fetched_at,
             source_path: self.source_path,
             managed_path: self.managed_path,
             created_at: self.created_at,
@@ -681,7 +782,10 @@ fn render_export_note(body: String, capture_contexts: Vec<CaptureContextRow>) ->
 fn export_context_label(context: CaptureContextRow) -> String {
     match context.context_type.as_str() {
         "text" => format!("- {}", context.text_value.unwrap_or_default()),
-        "url" => format!("- {}", context.url_value.unwrap_or_default()),
+        "url" => format!(
+            "- {}",
+            context.url_label.unwrap_or_else(|| context.url_value.unwrap_or_default())
+        ),
         "image" => format!(
             "- image: {}",
             context
@@ -738,7 +842,7 @@ async fn searchable_tag_text(
         "SELECT
             CASE
                 WHEN capture_contexts.context_type = 'text' THEN trim(COALESCE(text_contexts.label, capture_contexts.text_value, ''))
-                WHEN capture_contexts.context_type = 'url' THEN trim(COALESCE(capture_contexts.url_value, ''))
+                WHEN capture_contexts.context_type = 'url' THEN trim(COALESCE(capture_contexts.url_label, capture_contexts.url_value, ''))
                 ELSE ''
             END AS value
          FROM capture_contexts
@@ -792,6 +896,7 @@ fn parse_highlighted_tags(value: &str) -> Vec<MatchedTag> {
 
 async fn persist_capture_context(
     paths: &AppPaths,
+    url_title_fetcher: &Arc<dyn UrlTitleFetcher>,
     connection: &mut sqlx::SqliteConnection,
     note_id: &str,
     input: &CaptureContextInput,
@@ -807,23 +912,42 @@ async fn persist_capture_context(
             text_context_id: Some(find_or_create_text_context(connection, text.trim()).await?),
             text_value: None,
             url_value: None,
+            display_label: None,
+            url_title_status: None,
+            url_title_error: None,
+            url_title_fetched_at: None,
             source_path: None,
             managed_path: None,
             created_at: now.clone(),
             updated_at: now,
         },
-        CaptureContextInput::Url { url } => CaptureContext {
-            id,
-            note_id: note_id.to_string(),
-            kind: CaptureContextKind::Url,
-            text_context_id: None,
-            text_value: None,
-            url_value: Some(url.trim().to_string()),
-            source_path: None,
-            managed_path: None,
-            created_at: now.clone(),
-            updated_at: now,
-        },
+        CaptureContextInput::Url { url } => {
+            let trimmed_url = url.trim().to_string();
+            let metadata = if let Some(existing) =
+                find_existing_url_metadata(connection, &trimmed_url).await?
+            {
+                existing
+            } else {
+                fetch_url_metadata(&**url_title_fetcher, &trimmed_url).await
+            };
+
+            CaptureContext {
+                id,
+                note_id: note_id.to_string(),
+                kind: CaptureContextKind::Url,
+                text_context_id: None,
+                text_value: None,
+                url_value: Some(trimmed_url),
+                display_label: metadata.display_label,
+                url_title_status: Some(metadata.status.as_str().to_string()),
+                url_title_error: metadata.error,
+                url_title_fetched_at: metadata.fetched_at,
+                source_path: None,
+                managed_path: None,
+                created_at: now.clone(),
+                updated_at: now,
+            }
+        }
         CaptureContextInput::Image { source_path } => {
             let source = Path::new(source_path);
             let extension = source.extension().and_then(OsStr::to_str).unwrap_or("bin");
@@ -840,6 +964,10 @@ async fn persist_capture_context(
                 text_context_id: None,
                 text_value: None,
                 url_value: None,
+                display_label: None,
+                url_title_status: None,
+                url_title_error: None,
+                url_title_fetched_at: None,
                 source_path: Some(source_path.clone()),
                 managed_path: Some(managed_path.display().to_string()),
                 created_at: now.clone(),
@@ -889,6 +1017,189 @@ async fn find_or_create_text_context(
 
 fn sqlx_to_io(error: sqlx::Error) -> std::io::Error {
     std::io::Error::other(error.to_string())
+}
+
+fn parse_html_title(html: &str) -> Option<String> {
+    let lower = html.to_lowercase();
+    let title_start = lower.find("<title")?;
+    let content_start = lower[title_start..].find('>')? + title_start + 1;
+    let title_end = lower[content_start..].find("</title>")? + content_start;
+    let title = html[content_start..title_end].trim();
+
+    if title.is_empty() {
+        None
+    } else {
+        Some(title.split_whitespace().collect::<Vec<_>>().join(" "))
+    }
+}
+
+async fn find_existing_url_metadata(
+    connection: &mut sqlx::SqliteConnection,
+    url: &str,
+) -> Result<Option<UrlTitleMetadata>, std::io::Error> {
+    let row: Option<(Option<String>, Option<String>, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT url_label, url_title_status, url_title_error, url_title_fetched_at
+         FROM capture_contexts
+         WHERE context_type = 'url'
+           AND url_value = ?
+           AND url_title_status IS NOT NULL
+         ORDER BY COALESCE(url_title_fetched_at, updated_at) DESC, id DESC
+         LIMIT 1",
+    )
+    .bind(url)
+    .fetch_optional(&mut *connection)
+    .await
+    .map_err(sqlx_to_io)?;
+
+    Ok(row.and_then(|(display_label, status, error, fetched_at)| {
+        Some(UrlTitleMetadata {
+            display_label,
+            status: UrlTitleStatus::from_db(status.as_deref()?)?,
+            error,
+            fetched_at,
+        })
+    }))
+}
+
+async fn apply_url_metadata_to_existing_contexts(
+    connection: &mut sqlx::SqliteConnection,
+    url: &str,
+    metadata: &UrlTitleMetadata,
+) -> Result<(), String> {
+    sqlx::query(
+        "UPDATE capture_contexts
+         SET url_label = ?, url_title_status = ?, url_title_error = ?, url_title_fetched_at = ?, updated_at = ?
+         WHERE context_type = 'url' AND url_value = ?",
+    )
+    .bind(metadata.display_label.as_deref())
+    .bind(metadata.status.as_str())
+    .bind(metadata.error.as_deref())
+    .bind(metadata.fetched_at.as_deref())
+    .bind(now_timestamp())
+    .bind(url)
+    .execute(&mut *connection)
+    .await
+    .map_err(|err| err.to_string())?;
+
+    Ok(())
+}
+
+async fn fetch_url_metadata(fetcher: &dyn UrlTitleFetcher, url: &str) -> UrlTitleMetadata {
+    let fetched_at = now_timestamp();
+
+    match fetcher.fetch(url).await {
+        UrlTitleFetchResult::Resolved(title) => UrlTitleMetadata {
+            display_label: Some(title),
+            status: UrlTitleStatus::Resolved,
+            error: None,
+            fetched_at: Some(fetched_at),
+        },
+        UrlTitleFetchResult::EmptyTitle => UrlTitleMetadata {
+            display_label: None,
+            status: UrlTitleStatus::EmptyTitle,
+            error: None,
+            fetched_at: Some(fetched_at),
+        },
+        UrlTitleFetchResult::NonHtml => UrlTitleMetadata {
+            display_label: None,
+            status: UrlTitleStatus::NonHtml,
+            error: None,
+            fetched_at: Some(fetched_at),
+        },
+        UrlTitleFetchResult::Failed(error) => UrlTitleMetadata {
+            display_label: None,
+            status: UrlTitleStatus::Failed,
+            error: Some(error),
+            fetched_at: Some(fetched_at),
+        },
+    }
+}
+
+#[derive(Clone)]
+struct UrlTitleMetadata {
+    display_label: Option<String>,
+    status: UrlTitleStatus,
+    error: Option<String>,
+    fetched_at: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+enum UrlTitleStatus {
+    Resolved,
+    EmptyTitle,
+    NonHtml,
+    Failed,
+}
+
+impl UrlTitleStatus {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Resolved => "resolved",
+            Self::EmptyTitle => "empty_title",
+            Self::NonHtml => "non_html",
+            Self::Failed => "failed",
+        }
+    }
+
+    fn from_db(value: &str) -> Option<Self> {
+        match value {
+            "resolved" => Some(Self::Resolved),
+            "empty_title" => Some(Self::EmptyTitle),
+            "non_html" => Some(Self::NonHtml),
+            "failed" => Some(Self::Failed),
+            _ => None,
+        }
+    }
+}
+
+pub(crate) enum UrlTitleFetchResult {
+    Resolved(String),
+    EmptyTitle,
+    NonHtml,
+    Failed(String),
+}
+
+pub(crate) type UrlTitleFetchFuture<'a> =
+    Pin<Box<dyn Future<Output = UrlTitleFetchResult> + Send + 'a>>;
+
+pub(crate) trait UrlTitleFetcher: Send + Sync {
+    fn fetch<'a>(&'a self, url: &'a str) -> UrlTitleFetchFuture<'a>;
+}
+
+#[derive(Default)]
+struct HttpUrlTitleFetcher {
+    client: reqwest::Client,
+}
+
+impl UrlTitleFetcher for HttpUrlTitleFetcher {
+    fn fetch<'a>(&'a self, url: &'a str) -> UrlTitleFetchFuture<'a> {
+        Box::pin(async move {
+            let response = match self.client.get(url).send().await {
+                Ok(response) => response,
+                Err(error) => return UrlTitleFetchResult::Failed(error.to_string()),
+            };
+
+            let is_html = response
+                .headers()
+                .get(CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .map(|value| value.to_ascii_lowercase().contains("text/html"))
+                .unwrap_or(false);
+            if !is_html {
+                return UrlTitleFetchResult::NonHtml;
+            }
+
+            let html = match response.text().await {
+                Ok(html) => html,
+                Err(error) => return UrlTitleFetchResult::Failed(error.to_string()),
+            };
+
+            match parse_html_title(&html) {
+                Some(title) => UrlTitleFetchResult::Resolved(title),
+                None => UrlTitleFetchResult::EmptyTitle,
+            }
+        })
+    }
 }
 
 fn now_timestamp() -> String {
@@ -964,7 +1275,9 @@ impl<T> Pipe for T {}
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::fs;
+    use std::sync::{Arc, Mutex};
 
     use tempfile::TempDir;
 
@@ -972,7 +1285,7 @@ mod tests {
     use crate::db::schema::connect;
     use crate::domain::capture_context::CaptureContextInput;
 
-    use super::{NoteRepository, SaveNoteInput};
+    use super::{NoteRepository, SaveNoteInput, UrlTitleFetchFuture, UrlTitleFetchResult, UrlTitleFetcher};
 
     #[tokio::test]
     async fn saves_note_with_text_and_url_contexts() {
@@ -1002,7 +1315,7 @@ mod tests {
 
     #[tokio::test]
     async fn saves_url_context_title_metadata_when_available() {
-        let repo = test_repo().await;
+        let repo = test_repo_with_url_fetcher(vec![UrlTitleFetchResult::Resolved("Example Article".into())]).await;
         let saved = repo
             .save_note(SaveNoteInput {
                 note_id: None,
@@ -1024,6 +1337,134 @@ mod tests {
         .unwrap();
 
         assert_eq!(row.0.as_deref(), Some("Example Article"));
+        assert_eq!(row.1, "resolved");
+    }
+
+    #[tokio::test]
+    async fn stores_empty_title_status_without_display_label() {
+        let repo = test_repo_with_url_fetcher(vec![UrlTitleFetchResult::EmptyTitle]).await;
+        let saved = repo
+            .save_note(SaveNoteInput {
+                note_id: None,
+                body: "URL note".into(),
+                capture_contexts: vec![CaptureContextInput::Url {
+                    url: "https://example.com/untitled".into(),
+                }],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+
+        let row: (Option<String>, String) = sqlx::query_as(
+            "SELECT url_label, url_title_status FROM capture_contexts WHERE note_id = ?",
+        )
+        .bind(&saved.id)
+        .fetch_one(&repo.pool)
+        .await
+        .unwrap();
+
+        assert_eq!(row.0, None);
+        assert_eq!(row.1, "empty_title");
+    }
+
+    #[tokio::test]
+    async fn reuses_existing_url_title_metadata_for_duplicate_urls() {
+        let repo = test_repo_with_url_fetcher(vec![UrlTitleFetchResult::Resolved("Example Article".into())]).await;
+        repo.save_note(SaveNoteInput {
+            note_id: Some("first-note".into()),
+            body: "First".into(),
+            capture_contexts: vec![CaptureContextInput::Url {
+                url: "https://example.com/article".into(),
+            }],
+            request_analysis: false,
+        })
+        .await
+        .unwrap();
+
+        let saved = repo
+            .save_note(SaveNoteInput {
+                note_id: Some("second-note".into()),
+                body: "Second".into(),
+                capture_contexts: vec![CaptureContextInput::Url {
+                    url: "https://example.com/article".into(),
+                }],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+
+        let url_context = saved
+            .capture_contexts
+            .into_iter()
+            .find(|context| matches!(context.kind, crate::domain::capture_context::CaptureContextKind::Url))
+            .unwrap();
+
+        assert_eq!(url_context.display_label.as_deref(), Some("Example Article"));
+    }
+
+    #[tokio::test]
+    async fn refresh_failed_url_titles_only_updates_failed_urls() {
+        let repo = test_repo_with_url_fetcher(vec![
+            UrlTitleFetchResult::Failed("timeout".into()),
+            UrlTitleFetchResult::Resolved("Recovered Title".into()),
+        ])
+        .await;
+
+        repo.save_note(SaveNoteInput {
+            note_id: Some("failed-note".into()),
+            body: "Failed".into(),
+            capture_contexts: vec![CaptureContextInput::Url {
+                url: "https://example.com/failed".into(),
+            }],
+            request_analysis: false,
+        })
+        .await
+        .unwrap();
+
+        repo.refresh_failed_url_titles().await.unwrap();
+
+        let row: (Option<String>, String) = sqlx::query_as(
+            "SELECT url_label, url_title_status FROM capture_contexts WHERE note_id = ?",
+        )
+        .bind("failed-note")
+        .fetch_one(&repo.pool)
+        .await
+        .unwrap();
+
+        assert_eq!(row.0.as_deref(), Some("Recovered Title"));
+        assert_eq!(row.1, "resolved");
+    }
+
+    #[tokio::test]
+    async fn refresh_all_url_titles_replaces_existing_labels() {
+        let repo = test_repo_with_url_fetcher(vec![
+            UrlTitleFetchResult::Resolved("Old Title".into()),
+            UrlTitleFetchResult::Resolved("New Title".into()),
+        ])
+        .await;
+
+        repo.save_note(SaveNoteInput {
+            note_id: Some("refresh-note".into()),
+            body: "Refresh".into(),
+            capture_contexts: vec![CaptureContextInput::Url {
+                url: "https://example.com/refresh".into(),
+            }],
+            request_analysis: false,
+        })
+        .await
+        .unwrap();
+
+        repo.refresh_all_url_titles().await.unwrap();
+
+        let row: (Option<String>, String) = sqlx::query_as(
+            "SELECT url_label, url_title_status FROM capture_contexts WHERE note_id = ?",
+        )
+        .bind("refresh-note")
+        .fetch_one(&repo.pool)
+        .await
+        .unwrap();
+
+        assert_eq!(row.0.as_deref(), Some("New Title"));
         assert_eq!(row.1, "resolved");
     }
 
@@ -1457,13 +1898,17 @@ mod tests {
     }
 
     async fn test_repo() -> NoteRepository {
+        test_repo_with_url_fetcher(vec![UrlTitleFetchResult::Failed("network disabled".into())]).await
+    }
+
+    async fn test_repo_with_url_fetcher(results: Vec<UrlTitleFetchResult>) -> NoteRepository {
         let temp = TempDir::new().unwrap();
         let root = temp.keep();
         let paths = build_app_paths(&root);
         fs::create_dir_all(&paths.images_dir).unwrap();
         let pool = connect(&paths).await.unwrap();
 
-        NoteRepository::new(pool, paths)
+        NoteRepository::new_with_url_title_fetcher(pool, paths, Arc::new(StubUrlTitleFetcher::new(results)))
     }
 
     fn fixture_png_path() -> String {
@@ -1483,5 +1928,29 @@ mod tests {
         .unwrap();
 
         path.display().to_string()
+    }
+
+    struct StubUrlTitleFetcher {
+        results: Mutex<VecDeque<UrlTitleFetchResult>>,
+    }
+
+    impl StubUrlTitleFetcher {
+        fn new(results: Vec<UrlTitleFetchResult>) -> Self {
+            Self {
+                results: Mutex::new(results.into()),
+            }
+        }
+    }
+
+    impl UrlTitleFetcher for StubUrlTitleFetcher {
+        fn fetch<'a>(&'a self, _url: &'a str) -> UrlTitleFetchFuture<'a> {
+            Box::pin(async move {
+                self.results
+                    .lock()
+                    .unwrap()
+                    .pop_front()
+                    .unwrap_or(UrlTitleFetchResult::Failed("missing stub response".into()))
+            })
+        }
     }
 }

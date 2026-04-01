@@ -14,6 +14,8 @@ import {
   exportNotesMarkdown,
   openNote,
   renameTextContext,
+  refreshAllUrlTitles,
+  refreshFailedUrlTitles,
   saveNote,
   searchNotes,
 } from "./lib/tauri";
@@ -51,6 +53,7 @@ export default function App() {
   const [requestAnalysisAfterSave, setRequestAnalysisAfterSave] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [savingTextContextId, setSavingTextContextId] = useState<string | null>(null);
+  const [refreshingUrlTitles, setRefreshingUrlTitles] = useState<"failed" | "all" | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const loadedSnapshot = useRef<LoadedDraftSnapshot>({
     noteId: null,
@@ -260,6 +263,22 @@ export default function App() {
     }
   }
 
+  async function handleRefreshUrlTitles(scope: "failed" | "all") {
+    setRefreshingUrlTitles(scope);
+
+    try {
+      if (scope === "failed") {
+        await refreshFailedUrlTitles();
+      } else {
+        await refreshAllUrlTitles();
+      }
+      await loadWorkspaceData();
+      setToastMessage(scope === "failed" ? "retried failed url titles" : "refetched all url titles");
+    } finally {
+      setRefreshingUrlTitles(null);
+    }
+  }
+
   function isDraftUnchanged(): boolean {
     const snapshot = loadedSnapshot.current;
     return (
@@ -368,6 +387,22 @@ export default function App() {
                   />
                   <span>Request analysis after save</span>
                 </label>
+                <button
+                  className="settings-tag-save"
+                  disabled={refreshingUrlTitles !== null}
+                  type="button"
+                  onClick={() => void handleRefreshUrlTitles("failed")}
+                >
+                  Retry failed URL titles
+                </button>
+                <button
+                  className="settings-tag-save"
+                  disabled={refreshingUrlTitles !== null}
+                  type="button"
+                  onClick={() => void handleRefreshUrlTitles("all")}
+                >
+                  Refetch all URL titles
+                </button>
               </section>
 
               <section className="settings-section">
@@ -482,7 +517,14 @@ function mapCaptureContextToDraft(context: CaptureContext): DraftCaptureContext 
   return {
     id: context.id,
     kind: context.kind,
-    value: context.kind === "url" ? context.urlValue ?? "" : context.textValue ?? "",
+    ...(context.kind === "url"
+      ? {
+          url: context.urlValue ?? "",
+          label: context.displayLabel ?? context.urlValue ?? "",
+        }
+      : {
+          value: context.textValue ?? "",
+        }),
   };
 }
 
@@ -496,7 +538,7 @@ function mapDraftContextToSaveInput(context: DraftCaptureContext) {
   }
 
   if (context.kind === "url") {
-    return [{ kind: "url", url: context.value }] satisfies SaveCaptureContextInput[];
+    return [{ kind: "url", url: context.url }] satisfies SaveCaptureContextInput[];
   }
 
   return [{ kind: "text", text: context.value }] satisfies SaveCaptureContextInput[];

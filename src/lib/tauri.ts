@@ -46,6 +46,14 @@ export async function exportNotesMarkdown(noteIds: string[]): Promise<boolean> {
   return true;
 }
 
+export async function refreshFailedUrlTitles(): Promise<void> {
+  return invoke("refresh_failed_url_titles");
+}
+
+export async function refreshAllUrlTitles(): Promise<void> {
+  return invoke("refresh_all_url_titles");
+}
+
 export async function pickImageFile(): Promise<string | null> {
   const result = await open({
     multiple: false,

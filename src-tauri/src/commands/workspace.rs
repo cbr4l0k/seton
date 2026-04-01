@@ -73,6 +73,7 @@ pub struct CaptureContextDto {
     pub kind: String,
     pub text_value: Option<String>,
     pub url_value: Option<String>,
+    pub display_label: Option<String>,
     pub source_path: Option<String>,
     pub managed_path: Option<String>,
 }
@@ -183,6 +184,16 @@ pub async fn export_notes_markdown(
     fs::write(destination_path, markdown)
         .await
         .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub async fn refresh_failed_url_titles(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.repository.refresh_failed_url_titles().await
+}
+
+#[tauri::command]
+pub async fn refresh_all_url_titles(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.repository.refresh_all_url_titles().await
 }
 
 pub async fn bootstrap_workspace_with_state(state: &AppState) -> Result<WorkspacePayload, String> {
@@ -317,6 +328,7 @@ impl From<CaptureContext> for CaptureContextDto {
             .into(),
             text_value: value.text_value,
             url_value: value.url_value,
+            display_label: value.display_label,
             source_path: value.source_path,
             managed_path: value.managed_path,
         }

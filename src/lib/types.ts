@@ -48,6 +48,7 @@ export type CaptureContext =
       kind: "text";
       textValue: string | null;
       urlValue: null;
+      displayLabel?: null;
       sourcePath: null;
       managedPath: null;
     }
@@ -56,6 +57,7 @@ export type CaptureContext =
       kind: "url";
       textValue: null;
       urlValue: string | null;
+      displayLabel: string | null;
       sourcePath: null;
       managedPath: null;
     }
@@ -64,6 +66,7 @@ export type CaptureContext =
       kind: "image";
       textValue: null;
       urlValue: null;
+      displayLabel?: null;
       sourcePath: string | null;
       managedPath: string | null;
     };
