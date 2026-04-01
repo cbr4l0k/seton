@@ -1001,6 +1001,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn saves_url_context_title_metadata_when_available() {
+        let repo = test_repo().await;
+        let saved = repo
+            .save_note(SaveNoteInput {
+                note_id: None,
+                body: "URL note".into(),
+                capture_contexts: vec![CaptureContextInput::Url {
+                    url: "https://example.com/article".into(),
+                }],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+
+        let row: (Option<String>, String) = sqlx::query_as(
+            "SELECT url_label, url_title_status FROM capture_contexts WHERE note_id = ?",
+        )
+        .bind(&saved.id)
+        .fetch_one(&repo.pool)
+        .await
+        .unwrap();
+
+        assert_eq!(row.0.as_deref(), Some("Example Article"));
+        assert_eq!(row.1, "resolved");
+    }
+
+    #[tokio::test]
     async fn copies_image_contexts_into_managed_storage() {
         let repo = test_repo().await;
         let saved = repo

@@ -17,6 +17,8 @@ const mockExportNotesMarkdown = vi.fn();
 const mockSaveNote = vi.fn();
 const mockOpenNote = vi.fn();
 const mockRenameTextContext = vi.fn();
+const mockRefreshFailedUrlTitles = vi.fn();
+const mockRefreshAllUrlTitles = vi.fn();
 const mockSearchNotes = vi.fn();
 const mockPickImageFile = vi.fn();
 
@@ -25,6 +27,8 @@ vi.mock("../lib/tauri", () => ({
   deleteNote: (noteId: string) => mockDeleteNote(noteId),
   exportNotesMarkdown: (noteIds: string[]) => mockExportNotesMarkdown(noteIds),
   renameTextContext: (textContextId: string, label: string) => mockRenameTextContext(textContextId, label),
+  refreshFailedUrlTitles: () => mockRefreshFailedUrlTitles(),
+  refreshAllUrlTitles: () => mockRefreshAllUrlTitles(),
   saveNote: (input: unknown) => mockSaveNote(input),
   openNote: (noteId: string) => mockOpenNote(noteId),
   searchNotes: (query: string) => mockSearchNotes(query),
@@ -134,6 +138,8 @@ beforeEach(() => {
   mockSaveNote.mockReset();
   mockOpenNote.mockReset();
   mockRenameTextContext.mockReset();
+  mockRefreshFailedUrlTitles.mockReset();
+  mockRefreshAllUrlTitles.mockReset();
   mockSearchNotes.mockReset();
   mockPickImageFile.mockReset();
   mockOpenNote.mockResolvedValue(makeSavedNoteDetail());
@@ -178,6 +184,51 @@ test("settings can rename a shared text context and refresh suggestions", async 
     expect(mockRenameTextContext).toHaveBeenCalledWith("ctx-1", "Applied cryptography");
   });
   expect(await screen.findByDisplayValue("Applied cryptography")).toBeInTheDocument();
+});
+
+test("settings can retry failed and all saved url title fetches", async () => {
+  mockBootstrapWorkspace.mockResolvedValue(makeWorkspacePayload());
+  mockRefreshFailedUrlTitles.mockResolvedValue(undefined);
+  mockRefreshAllUrlTitles.mockResolvedValue(undefined);
+
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Retry failed URL titles" }));
+  fireEvent.click(screen.getByRole("button", { name: "Refetch all URL titles" }));
+
+  await waitFor(() => {
+    expect(mockRefreshFailedUrlTitles).toHaveBeenCalledTimes(1);
+  });
+  await waitFor(() => {
+    expect(mockRefreshAllUrlTitles).toHaveBeenCalledTimes(1);
+  });
+});
+
+test("opened notes display the fetched title for url contexts", async () => {
+  mockBootstrapWorkspace.mockResolvedValue(makeWorkspacePayload());
+  mockOpenNote.mockResolvedValue({
+    ...makeSavedNoteDetail(),
+    captureContexts: [
+      {
+        id: "ctx-url-1",
+        kind: "url",
+        textValue: null,
+        urlValue: "https://example.com/article",
+        displayLabel: "Example Article",
+        sourcePath: null,
+        managedPath: null,
+      },
+    ],
+  });
+
+  render(<App />);
+
+  expect(await screen.findByText("Seed note")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Seed note"));
+
+  expect(await screen.findByText("Example Article")).toBeInTheDocument();
+  expect(screen.queryByText("https://example.com/article")).not.toBeInTheDocument();
 });
 
 test("draft supports text, url, and image capture contexts", async () => {
