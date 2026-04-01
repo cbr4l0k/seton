@@ -134,6 +134,25 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleKeyDown, true);
   });
 
+  useEffect(() => {
+    if (!settingsOpen) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      setSettingsOpen(false);
+    }
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [settingsOpen]);
+
   function syncLoadedSnapshot(nextNoteId: string | null, nextBody: string, nextContexts: DraftCaptureContext[]) {
     loadedSnapshot.current = {
       noteId: nextNoteId,

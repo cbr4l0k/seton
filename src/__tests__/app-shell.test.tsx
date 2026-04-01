@@ -87,6 +87,25 @@ test("opens settings as a dedicated front panel", async () => {
   expect(await screen.findByDisplayValue("Cryptography")).toBeInTheDocument();
 });
 
+test("escape closes the settings dialog", async () => {
+  vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+    editableTextContexts: [],
+  });
+
+  render(<App />);
+
+  fireEvent.click(screen.getByLabelText("Settings"));
+  expect(screen.getByRole("dialog", { name: "Workspace settings" })).toBeInTheDocument();
+
+  fireEvent.keyDown(window, { key: "Escape" });
+
+  expect(screen.queryByRole("dialog", { name: "Workspace settings" })).not.toBeInTheDocument();
+});
+
 test("arrow keys move between center and placeholder panels", () => {
   render(<App />);
 
