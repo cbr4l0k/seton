@@ -5,6 +5,7 @@ use crate::app_state::AppState;
 use crate::db::repository::{
     EditableTextContext, KnownTextContext, SaveNoteInput, TextContextRelationship,
     TextContextSuggestionData,
+    UrlLabelLookup,
 };
 use crate::domain::capture_context::{CaptureContext, CaptureContextInput};
 use crate::domain::note::{MatchedTag, NoteDetail, NoteSearchResult, RecentNote};
@@ -103,6 +104,14 @@ pub struct EditableTextContextDto {
     pub use_count: i64,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UrlLabelLookupDto {
+    pub url: String,
+    pub display_label: Option<String>,
+    pub status: String,
+}
+
 #[derive(Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveNoteRequest {
@@ -125,6 +134,12 @@ pub enum CaptureContextRequest {
 pub struct RenameTextContextRequest {
     pub text_context_id: String,
     pub label: String,
+}
+
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LookupUrlLabelsRequest {
+    pub urls: Vec<String>,
 }
 
 #[tauri::command]
@@ -194,6 +209,18 @@ pub async fn refresh_failed_url_titles(state: tauri::State<'_, AppState>) -> Res
 #[tauri::command]
 pub async fn refresh_all_url_titles(state: tauri::State<'_, AppState>) -> Result<(), String> {
     state.repository.refresh_all_url_titles().await
+}
+
+#[tauri::command]
+pub async fn lookup_url_labels(
+    state: tauri::State<'_, AppState>,
+    input: LookupUrlLabelsRequest,
+) -> Result<Vec<UrlLabelLookupDto>, String> {
+    state
+        .repository
+        .lookup_url_labels(input.urls)
+        .await
+        .map(|items| items.into_iter().map(UrlLabelLookupDto::from).collect())
 }
 
 pub async fn bootstrap_workspace_with_state(state: &AppState) -> Result<WorkspacePayload, String> {
@@ -338,6 +365,16 @@ impl From<CaptureContext> for CaptureContextDto {
 impl From<MatchedTag> for MatchedTagDto {
     fn from(value: MatchedTag) -> Self {
         Self { text: value.text }
+    }
+}
+
+impl From<UrlLabelLookup> for UrlLabelLookupDto {
+    fn from(value: UrlLabelLookup) -> Self {
+        Self {
+            url: value.url,
+            display_label: value.display_label,
+            status: value.status,
+        }
     }
 }
 

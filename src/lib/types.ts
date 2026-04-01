@@ -42,6 +42,12 @@ export type EditableTextContext = {
   useCount: number;
 };
 
+export type UrlLabelLookup = {
+  url: string;
+  displayLabel: string | null;
+  status: "pending" | "resolved" | "empty_title" | "non_html" | "failed";
+};
+
 export type CaptureContext =
   | {
       id: string;

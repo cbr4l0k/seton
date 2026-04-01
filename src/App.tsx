@@ -18,6 +18,7 @@ import {
   refreshFailedUrlTitles,
   saveNote,
   searchNotes,
+  lookupUrlLabels,
 } from "./lib/tauri";
 import type {
   CaptureContext,
@@ -37,6 +38,7 @@ type LoadedDraftSnapshot = {
 
 export default function App() {
   const editorRef = useRef<MarkdownEditorHandle | null>(null);
+  const urlLabelPollTimeout = useRef<number | null>(null);
   const { position, setPosition } = useSpatialNavigation();
   const [body, setBody] = useState("");
   const [contexts, setContexts] = useState<DraftCaptureContext[]>([]);
@@ -85,6 +87,14 @@ export default function App() {
     const timeout = window.setTimeout(() => setToastMessage(null), 1400);
     return () => window.clearTimeout(timeout);
   }, [toastMessage]);
+
+  useEffect(() => {
+    return () => {
+      if (urlLabelPollTimeout.current !== null) {
+        window.clearTimeout(urlLabelPollTimeout.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const trimmedQuery = searchQuery.trim();
@@ -164,6 +174,70 @@ export default function App() {
     };
   }
 
+  function stopUrlLabelPolling() {
+    if (urlLabelPollTimeout.current !== null) {
+      window.clearTimeout(urlLabelPollTimeout.current);
+      urlLabelPollTimeout.current = null;
+    }
+  }
+
+  function beginUrlLabelPolling(urls: string[]) {
+    const trackedUrls = Array.from(new Set(urls));
+    if (trackedUrls.length === 0) {
+      stopUrlLabelPolling();
+      return;
+    }
+
+    if (urlLabelPollTimeout.current !== null) {
+      window.clearTimeout(urlLabelPollTimeout.current);
+      urlLabelPollTimeout.current = null;
+    }
+
+    void pollUrlLabelUpdates(trackedUrls);
+  }
+
+  async function pollUrlLabelUpdates(trackedUrls: string[]) {
+    try {
+      const lookups = await lookupUrlLabels(trackedUrls);
+      const lookupByUrl = new Map(lookups.map((item) => [item.url, item]));
+
+      setContexts((current) =>
+        current.map((context) => {
+          if (context.kind !== "url") {
+            return context;
+          }
+
+          const lookup = lookupByUrl.get(context.url);
+          if (!lookup?.displayLabel || lookup.displayLabel === context.label) {
+            return context;
+          }
+
+          return {
+            ...context,
+            label: lookup.displayLabel,
+          };
+        }),
+      );
+
+      const hasPending = trackedUrls.some((url) => {
+        const lookup = lookupByUrl.get(url);
+        return !lookup || lookup.status === "pending";
+      });
+
+      if (!hasPending) {
+        return;
+      }
+
+      urlLabelPollTimeout.current = window.setTimeout(() => {
+        void pollUrlLabelUpdates(trackedUrls);
+      }, 250);
+    } catch {
+      urlLabelPollTimeout.current = window.setTimeout(() => {
+        void pollUrlLabelUpdates(trackedUrls);
+      }, 500);
+    }
+  }
+
   async function handleOpenNote(noteId: string) {
     const detail = await openNote(noteId);
     const nextContexts = detail.captureContexts.map(mapCaptureContextToDraft);
@@ -171,6 +245,7 @@ export default function App() {
     setCurrentNoteId(detail.id);
     setBody(detail.body);
     setContexts(nextContexts);
+    stopUrlLabelPolling();
     setSearchQuery("");
     setSearchResults([]);
     setActiveSearchIndex(0);
@@ -213,6 +288,7 @@ export default function App() {
     setCurrentNoteId(null);
     setBody("");
     setContexts(preservedContexts);
+    beginUrlLabelPolling(urlDrafts(preservedContexts));
     syncLoadedSnapshot(null, "", preservedContexts);
     await loadWorkspaceData();
     setToastMessage("saved");
@@ -273,6 +349,7 @@ export default function App() {
         await refreshAllUrlTitles();
       }
       await loadWorkspaceData();
+      beginUrlLabelPolling(urlDrafts(contexts));
       setToastMessage(scope === "failed" ? "retried failed url titles" : "refetched all url titles");
     } finally {
       setRefreshingUrlTitles(null);
@@ -293,6 +370,11 @@ export default function App() {
     setCurrentNoteId(null);
     setBody("");
     setContexts(nextContexts);
+    if (options.clearContexts) {
+      stopUrlLabelPolling();
+    } else {
+      beginUrlLabelPolling(urlDrafts(nextContexts));
+    }
     syncLoadedSnapshot(null, "", nextContexts);
     setPosition("center");
   }
@@ -514,17 +596,19 @@ function mapCaptureContextToDraft(context: CaptureContext): DraftCaptureContext 
     };
   }
 
+  if (context.kind === "url") {
+    return {
+      id: context.id,
+      kind: "url",
+      url: context.urlValue ?? "",
+      label: context.displayLabel ?? context.urlValue ?? "",
+    };
+  }
+
   return {
     id: context.id,
-    kind: context.kind,
-    ...(context.kind === "url"
-      ? {
-          url: context.urlValue ?? "",
-          label: context.displayLabel ?? context.urlValue ?? "",
-        }
-      : {
-          value: context.textValue ?? "",
-        }),
+    kind: "text",
+    value: context.textValue ?? "",
   };
 }
 
@@ -580,4 +664,10 @@ function formatHistoryTimestamp(value: string | null) {
   const year = String(date.getFullYear());
 
   return `${day}.${month}.${year}`;
+}
+
+function urlDrafts(contexts: DraftCaptureContext[]) {
+  return contexts
+    .filter((context): context is Extract<DraftCaptureContext, { kind: "url" }> => context.kind === "url")
+    .map((context) => context.url);
 }

@@ -20,6 +20,7 @@ vi.mock("../lib/tauri", () => ({
   renameTextContext: vi.fn(),
   refreshFailedUrlTitles: vi.fn(),
   refreshAllUrlTitles: vi.fn(),
+  lookupUrlLabels: vi.fn().mockResolvedValue([]),
   saveNote: vi.fn(),
   openNote: vi.fn(),
   searchNotes: vi.fn().mockResolvedValue([]),

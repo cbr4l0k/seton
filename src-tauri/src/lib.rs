@@ -32,7 +32,8 @@ pub fn run() {
             commands::workspace::rename_text_context,
             commands::workspace::export_notes_markdown,
             commands::workspace::refresh_failed_url_titles,
-            commands::workspace::refresh_all_url_titles
+            commands::workspace::refresh_all_url_titles,
+            commands::workspace::lookup_url_labels
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -19,6 +19,7 @@ const mockOpenNote = vi.fn();
 const mockRenameTextContext = vi.fn();
 const mockRefreshFailedUrlTitles = vi.fn();
 const mockRefreshAllUrlTitles = vi.fn();
+const mockLookupUrlLabels = vi.fn();
 const mockSearchNotes = vi.fn();
 const mockPickImageFile = vi.fn();
 
@@ -29,6 +30,7 @@ vi.mock("../lib/tauri", () => ({
   renameTextContext: (textContextId: string, label: string) => mockRenameTextContext(textContextId, label),
   refreshFailedUrlTitles: () => mockRefreshFailedUrlTitles(),
   refreshAllUrlTitles: () => mockRefreshAllUrlTitles(),
+  lookupUrlLabels: (urls: string[]) => mockLookupUrlLabels(urls),
   saveNote: (input: unknown) => mockSaveNote(input),
   openNote: (noteId: string) => mockOpenNote(noteId),
   searchNotes: (query: string) => mockSearchNotes(query),
@@ -140,6 +142,7 @@ beforeEach(() => {
   mockRenameTextContext.mockReset();
   mockRefreshFailedUrlTitles.mockReset();
   mockRefreshAllUrlTitles.mockReset();
+  mockLookupUrlLabels.mockReset();
   mockSearchNotes.mockReset();
   mockPickImageFile.mockReset();
   mockOpenNote.mockResolvedValue(makeSavedNoteDetail());
@@ -294,6 +297,7 @@ test("saving a new note clears the body and preserves contexts for the next note
     body: "A note",
     updatedAt: "2026-03-21T11:00:00Z",
   });
+  mockLookupUrlLabels.mockResolvedValue([]);
 
   render(<App />);
 
@@ -318,6 +322,52 @@ test("saving a new note clears the body and preserves contexts for the next note
     expectThoughtEditorValue("");
   });
   expect(screen.getByText("https://example.com")).toBeInTheDocument();
+});
+
+test("saved url contexts live-update after background title resolution", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
+  mockSaveNote.mockResolvedValue({
+    ...makeSavedNoteDetail(),
+    body: "A note",
+    updatedAt: "2026-03-21T11:00:00Z",
+  });
+  mockLookupUrlLabels
+    .mockResolvedValueOnce([
+      { url: "https://example.com/article", displayLabel: null, status: "pending" },
+    ])
+    .mockResolvedValueOnce([
+      { url: "https://example.com/article", displayLabel: "Example Article", status: "resolved" },
+    ]);
+
+  render(<App />);
+
+  setThoughtEditorValue("A note");
+  fireEvent.change(screen.getByLabelText("Context input"), {
+    target: { value: "https://example.com/article" },
+  });
+  fireEvent.keyDown(screen.getByLabelText("Context input"), { key: "Enter" });
+
+  fireEvent.keyDown(getThoughtEditor(), {
+    key: "Enter",
+    ctrlKey: true,
+  });
+
+  await waitFor(() => {
+    expectThoughtEditorValue("");
+  });
+  expect(screen.getByText("https://example.com/article")).toBeInTheDocument();
+
+  await waitFor(() => {
+    expect(mockLookupUrlLabels).toHaveBeenCalledWith(["https://example.com/article"]);
+  });
+  await waitFor(() => {
+    expect(screen.getByText("Example Article")).toBeInTheDocument();
+  });
 });
 
 test("ctrl enter on an empty draft clears preserved contexts", async () => {

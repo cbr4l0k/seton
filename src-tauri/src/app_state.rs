@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::{fs, sync::Arc};
 
 use tauri::{AppHandle, Manager, Runtime};
+use tokio::time::{sleep, Duration};
 
 use crate::db::repository::NoteRepository;
 use crate::db::schema::connect;
@@ -31,6 +32,7 @@ impl AppState {
         fs::create_dir_all(&paths.images_dir)?;
         let pool = tauri::async_runtime::block_on(connect(&paths))?;
         let repository = NoteRepository::new(pool.clone(), paths.clone());
+        spawn_url_title_worker(repository.clone());
 
         Ok(Self {
             paths: Arc::new(paths),
@@ -48,6 +50,21 @@ impl AppState {
             repository,
         }
     }
+}
+
+fn spawn_url_title_worker(repository: NoteRepository) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            match repository.process_next_url_title_job().await {
+                Ok(true) => {}
+                Ok(false) => sleep(Duration::from_millis(250)).await,
+                Err(error) => {
+                    log::error!("url title worker failed: {error}");
+                    sleep(Duration::from_millis(1000)).await;
+                }
+            }
+        }
+    });
 }
 
 pub fn build_app_paths(root: &Path) -> AppPaths {

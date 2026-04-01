@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
-import type { NoteDetail, NoteSearchResult, SaveNoteRequest, WorkspacePayload } from "./types";
+import type { NoteDetail, NoteSearchResult, SaveNoteRequest, UrlLabelLookup, WorkspacePayload } from "./types";
 
 export async function bootstrapWorkspace(): Promise<WorkspacePayload> {
   return invoke<WorkspacePayload>("bootstrap_workspace");
@@ -52,6 +52,12 @@ export async function refreshFailedUrlTitles(): Promise<void> {
 
 export async function refreshAllUrlTitles(): Promise<void> {
   return invoke("refresh_all_url_titles");
+}
+
+export async function lookupUrlLabels(urls: string[]): Promise<UrlLabelLookup[]> {
+  return invoke("lookup_url_labels", {
+    input: { urls },
+  });
 }
 
 export async function pickImageFile(): Promise<string | null> {

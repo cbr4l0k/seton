@@ -56,6 +56,13 @@ pub struct TextContextSuggestionData {
     pub text_context_relationships: Vec<TextContextRelationship>,
 }
 
+#[derive(Clone, Debug)]
+pub struct UrlLabelLookup {
+    pub url: String,
+    pub display_label: Option<String>,
+    pub status: String,
+}
+
 impl NoteRepository {
     pub fn new(pool: SqlitePool, paths: AppPaths) -> Self {
         Self::new_with_url_title_fetcher(pool, paths, Arc::new(HttpUrlTitleFetcher::default()))
@@ -139,10 +146,11 @@ impl NoteRepository {
             .map_err(|err| err.to_string())?;
         }
 
+        let mut urls_to_enqueue = BTreeSet::new();
+
         for context in &input.capture_contexts {
             let persisted = persist_capture_context(
                 &self.paths,
-                &self.url_title_fetcher,
                 &mut *tx,
                 &note_id,
                 context,
@@ -172,6 +180,21 @@ impl NoteRepository {
             .execute(&mut *tx)
             .await
             .map_err(|err| err.to_string())?;
+
+            if matches!(persisted.kind, CaptureContextKind::Url)
+                && matches!(
+                    persisted.url_title_status.as_deref(),
+                    Some("pending") | Some("failed")
+                )
+            {
+                if let Some(url) = persisted.url_value.clone() {
+                    urls_to_enqueue.insert(url);
+                }
+            }
+        }
+
+        for url in urls_to_enqueue {
+            enqueue_url_title_job(&mut *tx, &url, UrlTitleJobStatus::Pending).await?;
         }
 
         upsert_note_search_index(&mut *tx, &note_id, body).await?;
@@ -515,11 +538,106 @@ impl NoteRepository {
     }
 
     pub async fn refresh_failed_url_titles(&self) -> Result<(), String> {
-        self.refresh_url_titles(UrlTitleRefreshScope::Failed).await
+        self.enqueue_url_title_refresh(UrlTitleRefreshScope::Failed).await
     }
 
     pub async fn refresh_all_url_titles(&self) -> Result<(), String> {
-        self.refresh_url_titles(UrlTitleRefreshScope::All).await
+        self.enqueue_url_title_refresh(UrlTitleRefreshScope::All).await
+    }
+
+    pub async fn process_next_url_title_job(&self) -> Result<bool, String> {
+        let mut tx = self.pool.begin().await.map_err(|err| err.to_string())?;
+        let job_url: Option<String> = sqlx::query_scalar(
+            "SELECT url
+             FROM url_title_jobs
+             WHERE status = 'pending'
+             ORDER BY scheduled_at ASC, url ASC
+             LIMIT 1",
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|err| err.to_string())?;
+
+        let Some(url) = job_url else {
+            tx.rollback().await.map_err(|err| err.to_string())?;
+            return Ok(false);
+        };
+
+        sqlx::query(
+            "UPDATE url_title_jobs
+             SET status = ?,
+                 started_at = ?,
+                 attempt_count = attempt_count + 1,
+                 updated_at = ?
+             WHERE url = ?",
+        )
+        .bind(UrlTitleJobStatus::InProgress.as_str())
+        .bind(now_timestamp())
+        .bind(now_timestamp())
+        .bind(&url)
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| err.to_string())?;
+        tx.commit().await.map_err(|err| err.to_string())?;
+
+        let metadata = fetch_url_metadata(&*self.url_title_fetcher, &url).await;
+        let mut tx = self.pool.begin().await.map_err(|err| err.to_string())?;
+        apply_url_metadata_to_existing_contexts(&mut *tx, &url, &metadata).await?;
+        let job_status = if metadata.status == UrlTitleStatus::Failed {
+            UrlTitleJobStatus::Failed
+        } else {
+            UrlTitleJobStatus::Completed
+        };
+        finalize_url_title_job(&mut *tx, &url, job_status, metadata.error.as_deref()).await?;
+
+        let affected_notes: Vec<(String, String)> = sqlx::query_as(
+            "SELECT notes.id, notes.body
+             FROM notes
+             JOIN capture_contexts ON capture_contexts.note_id = notes.id
+             WHERE capture_contexts.context_type = 'url'
+               AND capture_contexts.url_value = ?
+             GROUP BY notes.id, notes.body",
+        )
+        .bind(&url)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(|err| err.to_string())?;
+
+        for (note_id, body) in affected_notes {
+            upsert_note_search_index(&mut *tx, &note_id, &body).await?;
+        }
+
+        tx.commit().await.map_err(|err| err.to_string())?;
+        Ok(true)
+    }
+
+    pub async fn lookup_url_labels(&self, urls: Vec<String>) -> Result<Vec<UrlLabelLookup>, String> {
+        let mut results = Vec::new();
+
+        for url in urls {
+            let row: Option<(Option<String>, Option<String>)> = sqlx::query_as(
+                "SELECT url_label, url_title_status
+                 FROM capture_contexts
+                 WHERE context_type = 'url'
+                   AND url_value = ?
+                 ORDER BY COALESCE(url_title_fetched_at, updated_at) DESC, id DESC
+                 LIMIT 1",
+            )
+            .bind(&url)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|err| err.to_string())?;
+
+            if let Some((display_label, status)) = row {
+                results.push(UrlLabelLookup {
+                    url,
+                    display_label,
+                    status: status.unwrap_or_else(|| "pending".into()),
+                });
+            }
+        }
+
+        Ok(results)
     }
 
     pub async fn export_notes_markdown(&self, note_ids: Vec<String>) -> Result<String, String> {
@@ -592,7 +710,7 @@ impl NoteRepository {
         .map_err(|err| err.to_string())
     }
 
-    async fn refresh_url_titles(&self, scope: UrlTitleRefreshScope) -> Result<(), String> {
+    async fn enqueue_url_title_refresh(&self, scope: UrlTitleRefreshScope) -> Result<(), String> {
         let mut tx = self.pool.begin().await.map_err(|err| err.to_string())?;
         let rows: Vec<(String,)> = sqlx::query_as(match scope {
             UrlTitleRefreshScope::Failed => {
@@ -600,7 +718,7 @@ impl NoteRepository {
                  FROM capture_contexts
                  WHERE context_type = 'url'
                    AND url_value IS NOT NULL
-                   AND COALESCE(url_title_status, '') != 'resolved'"
+                   AND COALESCE(url_title_status, '') = 'failed'"
             }
             UrlTitleRefreshScope::All => {
                 "SELECT DISTINCT url_value
@@ -614,23 +732,19 @@ impl NoteRepository {
         .map_err(|err| err.to_string())?;
 
         for (url,) in rows {
-            let metadata = fetch_url_metadata(&*self.url_title_fetcher, &url).await;
-            apply_url_metadata_to_existing_contexts(&mut *tx, &url, &metadata).await?;
-        }
-
-        let affected_notes: Vec<(String, String)> = sqlx::query_as(
-            "SELECT notes.id, notes.body
-             FROM notes
-             JOIN capture_contexts ON capture_contexts.note_id = notes.id
-             WHERE capture_contexts.context_type = 'url'
-             GROUP BY notes.id, notes.body",
-        )
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(|err| err.to_string())?;
-
-        for (note_id, body) in affected_notes {
-            upsert_note_search_index(&mut *tx, &note_id, &body).await?;
+            enqueue_url_title_job(&mut *tx, &url, UrlTitleJobStatus::Pending).await?;
+            sqlx::query(
+                "UPDATE capture_contexts
+                 SET url_title_status = 'pending',
+                     url_title_error = NULL,
+                     updated_at = ?
+                 WHERE context_type = 'url' AND url_value = ?",
+            )
+            .bind(now_timestamp())
+            .bind(&url)
+            .execute(&mut *tx)
+            .await
+            .map_err(|err| err.to_string())?;
         }
 
         tx.commit().await.map_err(|err| err.to_string())
@@ -896,7 +1010,6 @@ fn parse_highlighted_tags(value: &str) -> Vec<MatchedTag> {
 
 async fn persist_capture_context(
     paths: &AppPaths,
-    url_title_fetcher: &Arc<dyn UrlTitleFetcher>,
     connection: &mut sqlx::SqliteConnection,
     note_id: &str,
     input: &CaptureContextInput,
@@ -923,12 +1036,12 @@ async fn persist_capture_context(
         },
         CaptureContextInput::Url { url } => {
             let trimmed_url = url.trim().to_string();
-            let metadata = if let Some(existing) =
-                find_existing_url_metadata(connection, &trimmed_url).await?
-            {
-                existing
-            } else {
-                fetch_url_metadata(&**url_title_fetcher, &trimmed_url).await
+            let metadata = match find_existing_url_metadata(connection, &trimmed_url).await? {
+                Some(existing) if matches!(
+                    existing.status,
+                    UrlTitleStatus::Resolved | UrlTitleStatus::EmptyTitle | UrlTitleStatus::NonHtml
+                ) => existing,
+                _ => pending_url_title_metadata(),
             };
 
             CaptureContext {
@@ -1019,6 +1132,15 @@ fn sqlx_to_io(error: sqlx::Error) -> std::io::Error {
     std::io::Error::other(error.to_string())
 }
 
+fn pending_url_title_metadata() -> UrlTitleMetadata {
+    UrlTitleMetadata {
+        display_label: None,
+        status: UrlTitleStatus::Pending,
+        error: None,
+        fetched_at: None,
+    }
+}
+
 fn parse_html_title(html: &str) -> Option<String> {
     let lower = html.to_lowercase();
     let title_start = lower.find("<title")?;
@@ -1084,6 +1206,62 @@ async fn apply_url_metadata_to_existing_contexts(
     Ok(())
 }
 
+async fn enqueue_url_title_job(
+    connection: &mut sqlx::SqliteConnection,
+    url: &str,
+    status: UrlTitleJobStatus,
+) -> Result<(), String> {
+    let now = now_timestamp();
+
+    sqlx::query(
+        "INSERT INTO url_title_jobs (
+            url, status, attempt_count, last_error, scheduled_at, started_at, finished_at, created_at, updated_at
+         ) VALUES (?, ?, 0, NULL, ?, NULL, NULL, ?, ?)
+         ON CONFLICT(url) DO UPDATE SET
+            status = excluded.status,
+            last_error = NULL,
+            scheduled_at = excluded.scheduled_at,
+            started_at = NULL,
+            finished_at = NULL,
+            updated_at = excluded.updated_at",
+    )
+    .bind(url)
+    .bind(status.as_str())
+    .bind(&now)
+    .bind(&now)
+    .bind(&now)
+    .execute(&mut *connection)
+    .await
+    .map_err(|err| err.to_string())?;
+
+    Ok(())
+}
+
+async fn finalize_url_title_job(
+    connection: &mut sqlx::SqliteConnection,
+    url: &str,
+    status: UrlTitleJobStatus,
+    last_error: Option<&str>,
+) -> Result<(), String> {
+    let now = now_timestamp();
+
+    sqlx::query(
+        "UPDATE url_title_jobs
+         SET status = ?, last_error = ?, finished_at = ?, updated_at = ?
+         WHERE url = ?",
+    )
+    .bind(status.as_str())
+    .bind(last_error)
+    .bind(&now)
+    .bind(&now)
+    .bind(url)
+    .execute(&mut *connection)
+    .await
+    .map_err(|err| err.to_string())?;
+
+    Ok(())
+}
+
 async fn fetch_url_metadata(fetcher: &dyn UrlTitleFetcher, url: &str) -> UrlTitleMetadata {
     let fetched_at = now_timestamp();
 
@@ -1123,8 +1301,9 @@ struct UrlTitleMetadata {
     fetched_at: Option<String>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum UrlTitleStatus {
+    Pending,
     Resolved,
     EmptyTitle,
     NonHtml,
@@ -1134,6 +1313,7 @@ enum UrlTitleStatus {
 impl UrlTitleStatus {
     fn as_str(&self) -> &'static str {
         match self {
+            Self::Pending => "pending",
             Self::Resolved => "resolved",
             Self::EmptyTitle => "empty_title",
             Self::NonHtml => "non_html",
@@ -1143,11 +1323,31 @@ impl UrlTitleStatus {
 
     fn from_db(value: &str) -> Option<Self> {
         match value {
+            "pending" => Some(Self::Pending),
             "resolved" => Some(Self::Resolved),
             "empty_title" => Some(Self::EmptyTitle),
             "non_html" => Some(Self::NonHtml),
             "failed" => Some(Self::Failed),
             _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum UrlTitleJobStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+}
+
+impl UrlTitleJobStatus {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
         }
     }
 }
@@ -1314,8 +1514,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn saves_url_context_title_metadata_when_available() {
-        let repo = test_repo_with_url_fetcher(vec![UrlTitleFetchResult::Resolved("Example Article".into())]).await;
+    async fn save_note_enqueues_pending_url_title_jobs_without_fetching_inline() {
+        let repo = test_repo_with_url_fetcher(vec![]).await;
         let saved = repo
             .save_note(SaveNoteInput {
                 note_id: None,
@@ -1336,35 +1536,19 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(row.0.as_deref(), Some("Example Article"));
-        assert_eq!(row.1, "resolved");
-    }
+        assert_eq!(row.0, None);
+        assert_eq!(row.1, "pending");
 
-    #[tokio::test]
-    async fn stores_empty_title_status_without_display_label() {
-        let repo = test_repo_with_url_fetcher(vec![UrlTitleFetchResult::EmptyTitle]).await;
-        let saved = repo
-            .save_note(SaveNoteInput {
-                note_id: None,
-                body: "URL note".into(),
-                capture_contexts: vec![CaptureContextInput::Url {
-                    url: "https://example.com/untitled".into(),
-                }],
-                request_analysis: false,
-            })
-            .await
-            .unwrap();
-
-        let row: (Option<String>, String) = sqlx::query_as(
-            "SELECT url_label, url_title_status FROM capture_contexts WHERE note_id = ?",
+        let job_row: (String, i64) = sqlx::query_as(
+            "SELECT status, attempt_count FROM url_title_jobs WHERE url = ?",
         )
-        .bind(&saved.id)
+        .bind("https://example.com/article")
         .fetch_one(&repo.pool)
         .await
         .unwrap();
 
-        assert_eq!(row.0, None);
-        assert_eq!(row.1, "empty_title");
+        assert_eq!(job_row.0, "pending");
+        assert_eq!(job_row.1, 0);
     }
 
     #[tokio::test]
@@ -1380,6 +1564,7 @@ mod tests {
         })
         .await
         .unwrap();
+        repo.process_next_url_title_job().await.unwrap();
 
         let saved = repo
             .save_note(SaveNoteInput {
@@ -1421,7 +1606,9 @@ mod tests {
         .await
         .unwrap();
 
+        repo.process_next_url_title_job().await.unwrap();
         repo.refresh_failed_url_titles().await.unwrap();
+        repo.process_next_url_title_job().await.unwrap();
 
         let row: (Option<String>, String) = sqlx::query_as(
             "SELECT url_label, url_title_status FROM capture_contexts WHERE note_id = ?",
@@ -1454,7 +1641,9 @@ mod tests {
         .await
         .unwrap();
 
+        repo.process_next_url_title_job().await.unwrap();
         repo.refresh_all_url_titles().await.unwrap();
+        repo.process_next_url_title_job().await.unwrap();
 
         let row: (Option<String>, String) = sqlx::query_as(
             "SELECT url_label, url_title_status FROM capture_contexts WHERE note_id = ?",
@@ -1465,6 +1654,36 @@ mod tests {
         .unwrap();
 
         assert_eq!(row.0.as_deref(), Some("New Title"));
+        assert_eq!(row.1, "resolved");
+    }
+
+    #[tokio::test]
+    async fn processing_queued_url_title_job_updates_saved_contexts() {
+        let repo = test_repo_with_url_fetcher(vec![UrlTitleFetchResult::Resolved("Example Article".into())]).await;
+        let saved = repo
+            .save_note(SaveNoteInput {
+                note_id: Some("queued-note".into()),
+                body: "Queued".into(),
+                capture_contexts: vec![CaptureContextInput::Url {
+                    url: "https://example.com/article".into(),
+                }],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(saved.capture_contexts[0].display_label, None);
+        repo.process_next_url_title_job().await.unwrap();
+
+        let row: (Option<String>, String) = sqlx::query_as(
+            "SELECT url_label, url_title_status FROM capture_contexts WHERE note_id = ?",
+        )
+        .bind("queued-note")
+        .fetch_one(&repo.pool)
+        .await
+        .unwrap();
+
+        assert_eq!(row.0.as_deref(), Some("Example Article"));
         assert_eq!(row.1, "resolved");
     }
 
