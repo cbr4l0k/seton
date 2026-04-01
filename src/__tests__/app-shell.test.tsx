@@ -55,12 +55,11 @@ test("renders the Thought Inbox shell", () => {
   expect(screen.getByLabelText("Notes panel")).toHaveAttribute("data-active", "false");
 });
 
-test("renders ambient shell layers and workspace chrome", () => {
+test("renders workspace chrome without ambient layers", () => {
   render(<App />);
 
-  expect(screen.getByTestId("ambient-background")).toBeInTheDocument();
-  expect(screen.getAllByTestId("ambient-ribbon")).toHaveLength(3);
-  expect(screen.getAllByTestId("ambient-shape")).toHaveLength(2);
+  expect(screen.getByRole("main")).toBeInTheDocument();
+  expect(screen.queryByTestId("ambient-background")).not.toBeInTheDocument();
 });
 
 test("bundles Departure Mono from a local asset", () => {
