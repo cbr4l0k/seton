@@ -85,20 +85,29 @@ textarea {
   z-index: 6;
   border: 1px solid var(--line-strong);
   border-radius: 0;
-  background: rgba(243, 240, 232, 0.78);
+  background: rgba(243, 240, 232, 0.42);
   color: var(--ink);
   width: 34px;
   height: 34px;
   padding: 0;
   box-shadow: none;
+  opacity: 0.48;
   cursor: pointer;
   display: grid;
   place-items: center;
+  transition:
+    opacity 180ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease;
 }
 
-.settings-trigger:hover {
+.settings-trigger:hover,
+.settings-trigger:focus-visible {
   border-color: var(--accent);
+  background: rgba(243, 240, 232, 0.9);
   color: var(--accent);
+  opacity: 0.96;
 }
 
 .settings-trigger__glyph {
