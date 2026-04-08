@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ffi::OsStr;
 use std::future::Future;
 use std::path::Path;
@@ -276,7 +276,7 @@ impl NoteRepository {
     }
 
     pub async fn list_recent_notes(&self, limit: i64) -> Result<Vec<RecentNote>, String> {
-        sqlx::query_as::<_, RecentNoteRow>(
+        let rows = sqlx::query_as::<_, RecentNoteRow>(
             "SELECT id, body, last_opened_at, updated_at
              FROM notes
              ORDER BY COALESCE(last_opened_at, updated_at) DESC, updated_at DESC
@@ -285,16 +285,21 @@ impl NoteRepository {
         .bind(limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|err| err.to_string())?
-        .into_iter()
-        .map(|row| RecentNote {
-            id: row.id,
-            preview: preview_text(&row.body),
-            last_opened_at: row.last_opened_at,
-            updated_at: row.updated_at,
-        })
-        .collect::<Vec<_>>()
-        .pipe(Ok)
+        .map_err(|err| err.to_string())?;
+
+        let note_ids = rows.iter().map(|row| row.id.clone()).collect::<Vec<_>>();
+        let text_context_labels = self.load_note_text_context_labels(&note_ids).await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| RecentNote {
+                text_context_labels: text_context_labels.get(&row.id).cloned().unwrap_or_default(),
+                id: row.id,
+                preview: preview_text(&row.body),
+                last_opened_at: row.last_opened_at,
+                updated_at: row.updated_at,
+            })
+            .collect::<Vec<_>>())
     }
 
     pub async fn delete_note(&self, note_id: String) -> Result<(), String> {
@@ -322,7 +327,7 @@ impl NoteRepository {
             return Ok(Vec::new());
         };
 
-        sqlx::query_as::<_, NoteSearchRow>(
+        let rows = sqlx::query_as::<_, NoteSearchRow>(
             "SELECT
                 notes.id,
                 notes.body,
@@ -343,11 +348,68 @@ impl NoteRepository {
         .bind(limit)
         .fetch_all(&self.pool)
         .await
-        .map_err(|err| err.to_string())?
-        .into_iter()
-        .map(NoteSearchRow::into_domain)
-        .collect::<Vec<_>>()
-        .pipe(Ok)
+        .map_err(|err| err.to_string())?;
+
+        let note_ids = rows.iter().map(|row| row.id.clone()).collect::<Vec<_>>();
+        let text_context_labels = self.load_note_text_context_labels(&note_ids).await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| row.into_domain(text_context_labels.get(&row.id).cloned().unwrap_or_default()))
+            .collect::<Vec<_>>())
+    }
+
+    async fn load_note_text_context_labels(
+        &self,
+        note_ids: &[String],
+    ) -> Result<HashMap<String, Vec<String>>, String> {
+        if note_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT
+                capture_contexts.note_id,
+                COALESCE(text_contexts.label, capture_contexts.text_value) AS text_value
+             FROM capture_contexts
+             LEFT JOIN text_contexts ON text_contexts.id = capture_contexts.text_context_id
+             WHERE capture_contexts.context_type = 'text'
+               AND capture_contexts.note_id IN (",
+        );
+
+        {
+            let mut separated = query.separated(", ");
+            for note_id in note_ids {
+                separated.push_bind(note_id);
+            }
+        }
+
+        query.push(")");
+
+        let rows = query
+            .build_query_as::<TextContextRow>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|err| err.to_string())?;
+
+        let mut grouped = HashMap::<String, Vec<String>>::new();
+        let mut seen = HashMap::<String, HashSet<String>>::new();
+
+        for row in rows {
+            let Some((label, normalized_label)) = normalized_text_label(row.text_value.as_deref()) else {
+                continue;
+            };
+
+            if seen
+                .entry(row.note_id.clone())
+                .or_default()
+                .insert(normalized_label)
+            {
+                grouped.entry(row.note_id).or_default().push(label);
+            }
+        }
+
+        Ok(grouped)
     }
 
     pub async fn list_text_context_suggestion_data(
@@ -864,7 +926,7 @@ struct NoteSearchRow {
 }
 
 impl NoteSearchRow {
-    fn into_domain(self) -> NoteSearchResult {
+    fn into_domain(self, text_context_labels: Vec<String>) -> NoteSearchResult {
         NoteSearchResult {
             id: self.id,
             preview: if self.preview.trim().is_empty() {
@@ -875,6 +937,7 @@ impl NoteSearchRow {
             last_opened_at: self.last_opened_at,
             updated_at: self.updated_at,
             matched_tags: parse_highlighted_tags(&self.highlighted_tags),
+            text_context_labels,
         }
     }
 }

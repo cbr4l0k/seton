@@ -523,6 +523,58 @@ textarea {
   text-transform: uppercase;
 }
 
+.concept-graph-panel {
+  display: grid;
+  gap: 14px;
+  padding: 18px 18px 20px;
+}
+
+.concept-graph-panel__header,
+.concept-graph-panel__columns {
+  display: grid;
+  gap: 12px;
+}
+
+.concept-graph-panel__status,
+.concept-graph-panel__empty {
+  margin: 0;
+  color: var(--muted);
+}
+
+.concept-graph-panel__section {
+  display: grid;
+  gap: 8px;
+}
+
+.concept-graph-panel__list {
+  display: grid;
+  gap: 6px;
+}
+
+.concept-node,
+.concept-edge {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.22);
+  padding: 8px 10px;
+  color: var(--muted);
+}
+
+.concept-node[data-related="true"],
+.concept-edge[data-related="true"] {
+  border-color: rgba(35, 139, 99, 0.5);
+  background: rgba(35, 139, 99, 0.09);
+  color: var(--ink);
+}
+
+.concept-node__count,
+.concept-edge__count {
+  color: var(--muted);
+}
+
 .history-list {
   list-style: none;
   margin: 0;

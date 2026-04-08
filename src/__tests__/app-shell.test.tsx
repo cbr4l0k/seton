@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import App from "../App";
 import departureMonoFontUrl from "../assets/fonts/DepartureMono-Regular.woff2?url";
@@ -266,4 +266,53 @@ test("activating the notes panel focuses the notes search input", async () => {
   fireEvent.keyDown(window, { key: "ArrowDown" });
 
   expect(await screen.findByLabelText("Search notes")).toHaveFocus();
+});
+
+test("selecting notes highlights related graph nodes and edges in the left view", async () => {
+  vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
+    history: [
+      {
+        id: "note-1",
+        preview: "Cryptography note",
+        lastOpenedAt: null,
+        updatedAt: "2026-04-08T10:00:00Z",
+        textContextLabels: ["cryptography", "number theory"],
+      },
+    ],
+    placeholders: [],
+    knownTextContexts: [
+      { label: "cryptography", normalizedLabel: "cryptography", useCount: 3 },
+      { label: "number theory", normalizedLabel: "number theory", useCount: 2 },
+      { label: "elliptic curves", normalizedLabel: "elliptic curves", useCount: 1 },
+    ],
+    textContextRelationships: [
+      { left: "cryptography", right: "number theory", useCount: 2 },
+      { left: "cryptography", right: "elliptic curves", useCount: 1 },
+    ],
+    editableTextContexts: [],
+  });
+
+  render(<App />);
+
+  fireEvent.keyDown(window, { key: "ArrowLeft" });
+
+  const graphPanel = screen.getByLabelText("Concept Graph panel");
+  expect(within(graphPanel).getByText("No note selection")).toBeInTheDocument();
+
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+  fireEvent.click(await screen.findByLabelText("Select Cryptography note"));
+  fireEvent.keyDown(window, { key: "ArrowLeft" });
+
+  expect(within(graphPanel).getByText("2 note-linked contexts")).toBeInTheDocument();
+  expect(within(graphPanel).getByText("cryptography")).toHaveAttribute("data-related", "true");
+  expect(within(graphPanel).getByText("number theory")).toHaveAttribute("data-related", "true");
+  expect(within(graphPanel).getByText("elliptic curves")).toHaveAttribute("data-related", "false");
+  expect(within(graphPanel).getByText("cryptography <> number theory")).toHaveAttribute(
+    "data-related",
+    "true",
+  );
+  expect(within(graphPanel).getByText("cryptography <> elliptic curves")).toHaveAttribute(
+    "data-related",
+    "false",
+  );
 });

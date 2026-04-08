@@ -9,6 +9,7 @@ export type RecentNote = {
   preview: string;
   lastOpenedAt: string | null;
   updatedAt: string;
+  textContextLabels?: string[];
 };
 
 export type MatchedTag = {
@@ -21,6 +22,7 @@ export type NoteSearchResult = {
   matchedTags: MatchedTag[];
   lastOpenedAt: string | null;
   updatedAt: string;
+  textContextLabels?: string[];
 };
 
 export type KnownTextContext = {

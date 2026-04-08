@@ -34,6 +34,7 @@ pub struct RecentNote {
     pub preview: String,
     pub last_opened_at: Option<String>,
     pub updated_at: String,
+    pub text_context_labels: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -48,4 +49,5 @@ pub struct NoteSearchResult {
     pub last_opened_at: Option<String>,
     pub updated_at: String,
     pub matched_tags: Vec<MatchedTag>,
+    pub text_context_labels: Vec<String>,
 }

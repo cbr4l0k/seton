@@ -2,6 +2,7 @@ import "./styles/app.css";
 import { useEffect, useRef, useState } from "react";
 
 import { CenterEditorPanel } from "./components/CenterEditorPanel";
+import { ConceptGraphPanel } from "./components/ConceptGraphPanel";
 import type { MarkdownEditorHandle } from "./components/MarkdownEditor";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { PlaceholderPanel } from "./components/PlaceholderPanel";
@@ -36,6 +37,11 @@ type LoadedDraftSnapshot = {
   contexts: DraftCaptureContext[];
 };
 
+type CrossViewSelection = {
+  noteIds: string[];
+  textContextLabels: string[];
+};
+
 export default function App() {
   const editorRef = useRef<MarkdownEditorHandle | null>(null);
   const urlLabelPollTimeout = useRef<number | null>(null);
@@ -50,7 +56,10 @@ export default function App() {
   const [textContextRelationships, setTextContextRelationships] = useState<TextContextRelationship[]>([]);
   const [editableTextContexts, setEditableTextContexts] = useState<EditableTextContext[]>([]);
   const [textContextDrafts, setTextContextDrafts] = useState<Record<string, string>>({});
-  const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
+  const [crossViewSelection, setCrossViewSelection] = useState<CrossViewSelection>({
+    noteIds: [],
+    textContextLabels: [],
+  });
   const [currentNoteId, setCurrentNoteId] = useState<string | null>(null);
   const [requestAnalysisAfterSave, setRequestAnalysisAfterSave] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -257,7 +266,13 @@ export default function App() {
     await deleteNote(noteId);
     setHistoryItems((current) => current.filter((item) => item.id !== noteId));
     setSearchResults((current) => current.filter((item) => item.id !== noteId));
-    setSelectedNoteIds((current) => current.filter((id) => id !== noteId));
+    setCrossViewSelection((current) =>
+      buildCrossViewSelection(
+        current.noteIds.filter((id) => id !== noteId),
+        historyItems,
+        searchResults,
+      ),
+    );
 
     if (currentNoteId === noteId) {
       setCurrentNoteId(null);
@@ -396,7 +411,7 @@ export default function App() {
   }
 
   async function handleExportSelectedNotes() {
-    const noteIds = [...selectedNoteIds];
+    const noteIds = [...crossViewSelection.noteIds];
 
     if (noteIds.length === 0) {
       return;
@@ -413,12 +428,14 @@ export default function App() {
   }
 
   function handleHistorySelectionChange(noteId: string, checked: boolean) {
-    setSelectedNoteIds((current) => {
-      if (checked) {
-        return current.includes(noteId) ? current : [...current, noteId];
-      }
+    setCrossViewSelection((current) => {
+      const nextNoteIds = checked
+        ? current.noteIds.includes(noteId)
+          ? current.noteIds
+          : [...current.noteIds, noteId]
+        : current.noteIds.filter((id) => id !== noteId);
 
-      return current.filter((id) => id !== noteId);
+      return buildCrossViewSelection(nextNoteIds, historyItems, searchResults);
     });
   }
 
@@ -543,10 +560,11 @@ export default function App() {
         title="Finished Documents"
       />
 
-      <PlaceholderPanel
+      <ConceptGraphPanel
         active={position === "left"}
-        position="left"
-        title="Concept Graph"
+        knownTextContexts={knownTextContexts}
+        selection={crossViewSelection}
+        textContextRelationships={textContextRelationships}
       />
 
       <CenterEditorPanel
@@ -578,7 +596,7 @@ export default function App() {
         onSelectionChange={handleHistorySelectionChange}
         searchQuery={searchQuery}
         searchResults={searchResults}
-        selectedNoteIds={selectedNoteIds}
+        selectedNoteIds={crossViewSelection.noteIds}
       />
 
       {toastMessage ? <div className="save-toast">{toastMessage}</div> : null}
@@ -670,4 +688,40 @@ function urlDrafts(contexts: DraftCaptureContext[]) {
   return contexts
     .filter((context): context is Extract<DraftCaptureContext, { kind: "url" }> => context.kind === "url")
     .map((context) => context.url);
+}
+
+function buildCrossViewSelection(
+  noteIds: string[],
+  historyItems: RecentNote[],
+  searchResults: NoteSearchResult[],
+): CrossViewSelection {
+  const noteTextContextLabels = new Map<string, string[]>();
+
+  for (const note of historyItems) {
+    noteTextContextLabels.set(note.id, note.textContextLabels ?? []);
+  }
+
+  for (const note of searchResults) {
+    noteTextContextLabels.set(note.id, note.textContextLabels ?? []);
+  }
+
+  const textContextLabels = new Set<string>();
+
+  for (const noteId of noteIds) {
+    for (const label of noteTextContextLabels.get(noteId) ?? []) {
+      const normalized = normalizeTextContextLabel(label);
+      if (normalized) {
+        textContextLabels.add(normalized);
+      }
+    }
+  }
+
+  return {
+    noteIds,
+    textContextLabels: [...textContextLabels],
+  };
+}
+
+function normalizeTextContextLabel(value: string) {
+  return value.trim().toLowerCase();
 }

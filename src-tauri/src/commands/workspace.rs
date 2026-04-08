@@ -35,6 +35,7 @@ pub struct RecentNoteDto {
     pub preview: String,
     pub last_opened_at: Option<String>,
     pub updated_at: String,
+    pub text_context_labels: Vec<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -65,6 +66,7 @@ pub struct NoteSearchResultDto {
     pub last_opened_at: Option<String>,
     pub updated_at: String,
     pub matched_tags: Vec<MatchedTagDto>,
+    pub text_context_labels: Vec<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -319,6 +321,7 @@ impl From<RecentNote> for RecentNoteDto {
             preview: value.preview,
             last_opened_at: value.last_opened_at,
             updated_at: value.updated_at,
+            text_context_labels: value.text_context_labels,
         }
     }
 }
@@ -401,6 +404,7 @@ impl From<NoteSearchResult> for NoteSearchResultDto {
                 .into_iter()
                 .map(MatchedTagDto::from)
                 .collect(),
+            text_context_labels: value.text_context_labels,
         }
     }
 }
