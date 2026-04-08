@@ -355,7 +355,10 @@ impl NoteRepository {
 
         Ok(rows
             .into_iter()
-            .map(|row| row.into_domain(text_context_labels.get(&row.id).cloned().unwrap_or_default()))
+            .map(|row| {
+                let note_id = row.id.clone();
+                row.into_domain(text_context_labels.get(&note_id).cloned().unwrap_or_default())
+            })
             .collect::<Vec<_>>())
     }
 
