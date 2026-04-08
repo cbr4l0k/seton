@@ -11,7 +11,9 @@ type ConceptGraphFilter =
 
 type ConceptGraphPanelProps = {
   active: boolean;
+  focusedItem: ConceptGraphFilter | null;
   knownTextContexts: KnownTextContext[];
+  onFocusSelect: (filter: ConceptGraphFilter) => void;
   onFilterSelect: (filter: ConceptGraphFilter) => void;
   textContextRelationships: TextContextRelationship[];
   selection: ConceptGraphSelection;
@@ -19,7 +21,9 @@ type ConceptGraphPanelProps = {
 
 export function ConceptGraphPanel({
   active,
+  focusedItem,
   knownTextContexts,
+  onFocusSelect,
   onFilterSelect,
   textContextRelationships,
   selection,
@@ -31,6 +35,9 @@ export function ConceptGraphPanel({
     <section aria-label="Concept Graph panel" className="panel panel-left concept-graph-panel" data-active={active}>
       <div className="concept-graph-panel__header">
         <p className="panel-subtle-title">Concept Graph</p>
+        <p className="concept-graph-panel__status">
+          {focusedItem ? `Focused: ${formatFocusLabel(focusedItem)}` : "No graph focus"}
+        </p>
         <p className="concept-graph-panel__status">
           {selectedContextCount > 0 ? `${selectedContextCount} note-linked contexts` : "No note selection"}
         </p>
@@ -45,23 +52,37 @@ export function ConceptGraphPanel({
               {knownTextContexts.length > 0 ? (
                 knownTextContexts.map((context) => {
                   const related = relatedLabels.has(normalizeTextContextLabel(context.label));
+                  const focused =
+                    focusedItem?.kind === "text_context" &&
+                    normalizeTextContextLabel(focusedItem.label) === normalizeTextContextLabel(context.label);
 
                   return (
                     <div
                       key={context.normalizedLabel}
                       className="concept-node"
+                      data-focused={focused}
                       data-related={related}
                     >
-                      <button
-                        aria-label={`Filter notes by ${context.label}`}
-                        className="concept-graph-panel__action"
-                        data-related={related}
-                        data-testid="concept-node-label"
-                        type="button"
-                        onClick={() => onFilterSelect({ kind: "text_context", label: context.label })}
-                      >
-                        {context.label}
-                      </button>
+                      <div className="concept-graph-panel__actions">
+                        <button
+                          aria-label={`Focus ${context.label}`}
+                          className="concept-graph-panel__action"
+                          data-related={related}
+                          data-testid="concept-node-label"
+                          type="button"
+                          onClick={() => onFocusSelect({ kind: "text_context", label: context.label })}
+                        >
+                          {context.label}
+                        </button>
+                        <button
+                          aria-label={`Filter notes by ${context.label}`}
+                          className="concept-graph-panel__filter"
+                          type="button"
+                          onClick={() => onFilterSelect({ kind: "text_context", label: context.label })}
+                        >
+                          filter
+                        </button>
+                      </div>
                       <span className="concept-node__count">{context.useCount}</span>
                     </div>
                   );
@@ -78,29 +99,50 @@ export function ConceptGraphPanel({
               {textContextRelationships.length > 0 ? (
                 textContextRelationships.map((relationship) => {
                   const related = isRelatedRelationship(relationship.left, relationship.right, relatedLabels);
+                  const focused =
+                    focusedItem?.kind === "relationship" &&
+                    normalizeTextContextLabel(focusedItem.left) === normalizeTextContextLabel(relationship.left) &&
+                    normalizeTextContextLabel(focusedItem.right) === normalizeTextContextLabel(relationship.right);
 
                   return (
                     <div
                       key={`${relationship.left}-${relationship.right}`}
                       className="concept-edge"
+                      data-focused={focused}
                       data-related={related}
                     >
-                      <button
-                        aria-label={`Filter notes by ${relationship.left} and ${relationship.right}`}
-                        className="concept-graph-panel__action"
-                        data-related={related}
-                        data-testid="concept-edge-label"
-                        type="button"
-                        onClick={() =>
-                          onFilterSelect({
-                            kind: "relationship",
-                            left: relationship.left,
-                            right: relationship.right,
-                          })
-                        }
-                      >
-                        {relationship.left} {"<>"} {relationship.right}
-                      </button>
+                      <div className="concept-graph-panel__actions">
+                        <button
+                          aria-label={`Focus ${relationship.left} <> ${relationship.right}`}
+                          className="concept-graph-panel__action"
+                          data-related={related}
+                          data-testid="concept-edge-label"
+                          type="button"
+                          onClick={() =>
+                            onFocusSelect({
+                              kind: "relationship",
+                              left: relationship.left,
+                              right: relationship.right,
+                            })
+                          }
+                        >
+                          {relationship.left} {"<>"} {relationship.right}
+                        </button>
+                        <button
+                          aria-label={`Filter notes by ${relationship.left} and ${relationship.right}`}
+                          className="concept-graph-panel__filter"
+                          type="button"
+                          onClick={() =>
+                            onFilterSelect({
+                              kind: "relationship",
+                              left: relationship.left,
+                              right: relationship.right,
+                            })
+                          }
+                        >
+                          filter
+                        </button>
+                      </div>
                       <span className="concept-edge__count">{relationship.useCount}</span>
                     </div>
                   );
@@ -126,4 +168,12 @@ function isRelatedRelationship(left: string, right: string, relatedLabels: Set<s
     relatedLabels.has(normalizeTextContextLabel(left)) &&
     relatedLabels.has(normalizeTextContextLabel(right))
   );
+}
+
+function formatFocusLabel(target: ConceptGraphFilter) {
+  if (target.kind === "text_context") {
+    return target.label;
+  }
+
+  return `${target.left} + ${target.right}`;
 }

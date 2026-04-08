@@ -369,7 +369,7 @@ test("graph panel keeps details scrollable without reordering graph items", asyn
   ]);
 });
 
-test("clicking graph nodes and edges selects matching notes without hiding the rest", async () => {
+test("graph focus stays separate from note selection and filtering", async () => {
   vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
     history: [
       {
@@ -411,38 +411,50 @@ test("clicking graph nodes and edges selects matching notes without hiding the r
 
   render(<App />);
 
+  const notesPanel = screen.getByLabelText("Notes panel");
+
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+  fireEvent.click(await screen.findByLabelText("Select Systems note"));
   fireEvent.keyDown(window, { key: "ArrowLeft" });
 
+  fireEvent.click(await screen.findByRole("button", { name: "Focus cryptography" }));
+
+  const graphPanel = screen.getByLabelText("Concept Graph panel");
+  expect(within(graphPanel).getByText("Focused: cryptography")).toBeInTheDocument();
+
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+  expect(within(notesPanel).queryByText("Filtered by cryptography")).not.toBeInTheDocument();
+  expect(within(notesPanel).getByLabelText("Select Systems note")).toBeChecked();
+  expect(within(notesPanel).getByLabelText("Select Cryptography note")).not.toBeChecked();
+  expect(within(notesPanel).getByLabelText("Select Elliptic note")).not.toBeChecked();
+
+  fireEvent.keyDown(window, { key: "ArrowLeft" });
   fireEvent.click(await screen.findByRole("button", { name: "Filter notes by cryptography" }));
 
-  const notesPanel = screen.getByLabelText("Notes panel");
   expect(notesPanel).toHaveAttribute("data-active", "true");
   expect(within(notesPanel).getByText("Filtered by cryptography")).toBeInTheDocument();
-  expect(within(notesPanel).getByText("Cryptography note")).toBeInTheDocument();
-  expect(within(notesPanel).getByText("Elliptic note")).toBeInTheDocument();
-  expect(within(notesPanel).getByText("Systems note")).toBeInTheDocument();
-  expect(within(notesPanel).getByLabelText("Select Cryptography note")).toBeChecked();
-  expect(within(notesPanel).getByLabelText("Select Elliptic note")).toBeChecked();
-  expect(within(notesPanel).getByLabelText("Select Systems note")).not.toBeChecked();
+  expect(within(notesPanel).queryByText("Systems note")).not.toBeInTheDocument();
+  expect(within(notesPanel).getByLabelText("Select Cryptography note")).not.toBeChecked();
+  expect(within(notesPanel).getByLabelText("Select Elliptic note")).not.toBeChecked();
+  expect(within(notesPanel).getByRole("button", { name: "Export selected" })).toBeEnabled();
 
   fireEvent.keyDown(window, { key: "ArrowLeft" });
-  fireEvent.click(await screen.findByRole("button", { name: "Filter notes by cryptography and number theory" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Focus cryptography <> number theory" }));
+  expect(within(graphPanel).getByText("Focused: cryptography + number theory")).toBeInTheDocument();
 
+  fireEvent.click(await screen.findByRole("button", { name: "Filter notes by cryptography and number theory" }));
   expect(within(notesPanel).getByText("Filtered by cryptography + number theory")).toBeInTheDocument();
-  expect(within(notesPanel).getByText("Cryptography note")).toBeInTheDocument();
-  expect(within(notesPanel).getByText("Elliptic note")).toBeInTheDocument();
-  expect(within(notesPanel).getByText("Systems note")).toBeInTheDocument();
-  expect(within(notesPanel).getByLabelText("Select Cryptography note")).toBeChecked();
-  expect(within(notesPanel).getByLabelText("Select Elliptic note")).not.toBeChecked();
-  expect(within(notesPanel).getByLabelText("Select Systems note")).not.toBeChecked();
+  expect(within(notesPanel).getByLabelText("Select Cryptography note")).not.toBeChecked();
+  expect(within(notesPanel).queryByText("Elliptic note")).not.toBeInTheDocument();
+  expect(within(notesPanel).queryByText("Systems note")).not.toBeInTheDocument();
+  expect(within(notesPanel).getByRole("button", { name: "Export selected" })).toBeEnabled();
 
   fireEvent.click(within(notesPanel).getByRole("button", { name: "Clear graph filter" }));
 
   expect(within(notesPanel).queryByText("Filtered by cryptography + number theory")).not.toBeInTheDocument();
-  expect(within(notesPanel).getByText("Cryptography note")).toBeInTheDocument();
-  expect(within(notesPanel).getByText("Elliptic note")).toBeInTheDocument();
+  expect(within(graphPanel).getByText("Focused: cryptography + number theory")).toBeInTheDocument();
   expect(within(notesPanel).getByText("Systems note")).toBeInTheDocument();
   expect(within(notesPanel).getByLabelText("Select Cryptography note")).not.toBeChecked();
   expect(within(notesPanel).getByLabelText("Select Elliptic note")).not.toBeChecked();
-  expect(within(notesPanel).getByLabelText("Select Systems note")).not.toBeChecked();
+  expect(within(notesPanel).getByLabelText("Select Systems note")).toBeChecked();
 });
