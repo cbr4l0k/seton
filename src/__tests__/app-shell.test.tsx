@@ -8,6 +8,75 @@ type MarkdownEditorTestApi = {
   focus: () => void;
 };
 
+const cytoscapeMock = vi.hoisted(() => {
+  type Handler = (event: { target: { data: (key?: string) => unknown } }) => void;
+  const instances: Array<{
+    handlers: Map<string, Handler>;
+    instance: Record<string, unknown>;
+    options: Record<string, unknown>;
+  }> = [];
+
+  const factory = vi.fn((options: Record<string, unknown>) => {
+    const handlers = new Map<string, Handler>();
+    const instance = {
+      destroy: vi.fn(),
+      fit: vi.fn(),
+      layout: vi.fn(() => ({ run: vi.fn() })),
+      off: vi.fn(),
+      on: vi.fn((eventName: string, selector: string | Handler, handler?: Handler) => {
+        if (typeof selector === "string" && handler) {
+          handlers.set(`${eventName}:${selector}`, handler);
+          return instance;
+        }
+
+        if (typeof selector === "function") {
+          handlers.set(eventName, selector);
+        }
+
+        return instance;
+      }),
+      resize: vi.fn(),
+    };
+
+    instances.push({ handlers, instance, options });
+    return instance;
+  });
+
+  return {
+    emitLast(key: string, data: Record<string, unknown>) {
+      const record = instances.at(-1);
+      if (!record) {
+        throw new Error("No Cytoscape instance available");
+      }
+
+      const handler = record.handlers.get(key);
+      if (!handler) {
+        throw new Error(`No Cytoscape handler registered for ${key}`);
+      }
+
+      handler({
+        target: {
+          data(requestedKey?: string) {
+            return requestedKey ? data[requestedKey] : data;
+          },
+        },
+      });
+    },
+    factory,
+    lastOptions() {
+      return instances.at(-1)?.options ?? null;
+    },
+    reset() {
+      instances.length = 0;
+      factory.mockClear();
+    },
+  };
+});
+
+vi.mock("cytoscape", () => ({
+  default: cytoscapeMock.factory,
+}));
+
 vi.mock("../lib/tauri", () => ({
   bootstrapWorkspace: vi.fn().mockResolvedValue({
     history: [],
@@ -29,6 +98,7 @@ vi.mock("../lib/tauri", () => ({
 }));
 
 beforeEach(() => {
+  cytoscapeMock.reset();
   vi.mocked(bootstrapWorkspace).mockResolvedValue({
     history: [],
     placeholders: [],
@@ -63,6 +133,25 @@ function deferred<T>() {
   });
 
   return { promise, resolve, reject };
+}
+
+function emitGraphNodeTap(label: string) {
+  act(() => {
+    cytoscapeMock.emitLast("tap:node", {
+      kind: "text_context",
+      label,
+    });
+  });
+}
+
+function emitGraphEdgeTap(left: string, right: string) {
+  act(() => {
+    cytoscapeMock.emitLast("tap:edge", {
+      kind: "relationship",
+      left,
+      right,
+    });
+  });
 }
 
 test("renders the Thought Inbox shell", () => {
@@ -317,20 +406,25 @@ test("selecting notes highlights related graph nodes and edges in the left view"
   fireEvent.keyDown(window, { key: "ArrowLeft" });
 
   expect(within(graphPanel).getByText("2 note-linked contexts")).toBeInTheDocument();
-  expect(within(graphPanel).getByText("cryptography")).toHaveAttribute("data-related", "true");
-  expect(within(graphPanel).getByText("number theory")).toHaveAttribute("data-related", "true");
-  expect(within(graphPanel).getByText("elliptic curves")).toHaveAttribute("data-related", "false");
-  expect(within(graphPanel).getByText("cryptography <> number theory")).toHaveAttribute(
-    "data-related",
-    "true",
+  const options = cytoscapeMock.lastOptions() as { elements?: Array<{ classes?: string; data: Record<string, unknown> }> } | null;
+  const cryptographyNode = options?.elements?.find((element) => element.data.label === "cryptography");
+  const numberTheoryNode = options?.elements?.find((element) => element.data.label === "number theory");
+  const ellipticNode = options?.elements?.find((element) => element.data.label === "elliptic curves");
+  const cryptographyEdge = options?.elements?.find(
+    (element) => element.data.left === "cryptography" && element.data.right === "number theory",
   );
-  expect(within(graphPanel).getByText("cryptography <> elliptic curves")).toHaveAttribute(
-    "data-related",
-    "false",
+  const ellipticEdge = options?.elements?.find(
+    (element) => element.data.left === "cryptography" && element.data.right === "elliptic curves",
   );
+
+  expect(cryptographyNode?.classes).toContain("is-related");
+  expect(numberTheoryNode?.classes).toContain("is-related");
+  expect(ellipticNode?.classes ?? "").not.toContain("is-related");
+  expect(cryptographyEdge?.classes).toContain("is-related");
+  expect(ellipticEdge?.classes ?? "").not.toContain("is-related");
 });
 
-test("graph panel keeps details scrollable without reordering graph items", async () => {
+test("graph panel mounts a Cytoscape canvas with mapped nodes and edges", async () => {
   vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
     history: [
       {
@@ -365,21 +459,13 @@ test("graph panel keeps details scrollable without reordering graph items", asyn
   const graphPanel = screen.getByLabelText("Concept Graph panel");
   const scrollRegion = within(graphPanel).getByLabelText("Concept graph details");
   expect(scrollRegion).toHaveAttribute("tabindex", "0");
+  expect(within(graphPanel).getByTestId("concept-graph-canvas")).toBeInTheDocument();
 
-  const nodeLabels = within(graphPanel).getAllByTestId("concept-node-label").map((node) => node.textContent);
-  expect(nodeLabels).toEqual([
-    "elliptic curves",
-    "cryptography",
-    "distributed systems",
-    "number theory",
-  ]);
-
-  const edgeLabels = within(graphPanel).getAllByTestId("concept-edge-label").map((edge) => edge.textContent);
-  expect(edgeLabels).toEqual([
-    "cryptography <> number theory",
-    "cryptography <> elliptic curves",
-    "distributed systems <> number theory",
-  ]);
+  const options = cytoscapeMock.lastOptions() as { elements?: Array<{ data: Record<string, unknown> }> } | null;
+  expect(options?.elements).toBeDefined();
+  expect(options?.elements).toHaveLength(7);
+  expect(options?.elements?.filter((element) => element.data.kind === "text_context")).toHaveLength(4);
+  expect(options?.elements?.filter((element) => element.data.kind === "relationship")).toHaveLength(3);
 });
 
 test("graph focus stays separate from note selection and filtering", async () => {
@@ -456,10 +542,10 @@ test("graph focus stays separate from note selection and filtering", async () =>
   fireEvent.click(await screen.findByLabelText("Select Systems note"));
   fireEvent.keyDown(window, { key: "ArrowLeft" });
 
-  fireEvent.click(await screen.findByRole("button", { name: "Focus cryptography" }));
+  emitGraphNodeTap("cryptography");
 
   const graphPanel = screen.getByLabelText("Concept Graph panel");
-  expect(within(graphPanel).getByText("Focused: cryptography")).toBeInTheDocument();
+  expect(await within(graphPanel).findByText("Focused: cryptography")).toBeInTheDocument();
 
   fireEvent.keyDown(window, { key: "ArrowDown" });
   expect(within(notesPanel).queryByText("Filtered by cryptography")).not.toBeInTheDocument();
@@ -469,7 +555,7 @@ test("graph focus stays separate from note selection and filtering", async () =>
 
   fireEvent.keyDown(window, { key: "ArrowLeft" });
   await act(async () => {
-    fireEvent.click(await screen.findByRole("button", { name: "Filter notes by cryptography" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Filter notes by focused graph item" }));
   });
 
   expect(notesPanel).toHaveAttribute("data-active", "true");
@@ -480,11 +566,11 @@ test("graph focus stays separate from note selection and filtering", async () =>
   expect(within(notesPanel).getByRole("button", { name: "Export checked notes" })).toBeEnabled();
 
   fireEvent.keyDown(window, { key: "ArrowLeft" });
-  fireEvent.click(await screen.findByRole("button", { name: "Focus cryptography <> number theory" }));
-  expect(within(graphPanel).getByText("Focused: cryptography + number theory")).toBeInTheDocument();
+  emitGraphEdgeTap("cryptography", "number theory");
+  expect(await within(graphPanel).findByText("Focused: cryptography + number theory")).toBeInTheDocument();
 
   await act(async () => {
-    fireEvent.click(await screen.findByRole("button", { name: "Filter notes by cryptography and number theory" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Filter notes by focused graph item" }));
   });
   expect(within(notesPanel).getByText("Filtered by cryptography + number theory")).toBeInTheDocument();
   expect(await within(notesPanel).findByLabelText("Select Cryptography note")).not.toBeChecked();
@@ -529,7 +615,8 @@ test("graph filtering delegates note lookup to the text-context backend path", a
   render(<App />);
 
   fireEvent.keyDown(window, { key: "ArrowLeft" });
-  fireEvent.click(await screen.findByRole("button", { name: "Filter notes by how to download the images" }));
+  emitGraphNodeTap("how to download the images");
+  fireEvent.click(await screen.findByRole("button", { name: "Filter notes by focused graph item" }));
 
   const notesPanel = screen.getByLabelText("Notes panel");
   expect(notesPanel).toHaveAttribute("data-active", "true");
@@ -571,7 +658,8 @@ test("graph filtering alone does not enable export", async () => {
   render(<App />);
 
   fireEvent.keyDown(window, { key: "ArrowLeft" });
-  fireEvent.click(await screen.findByRole("button", { name: "Filter notes by cryptography" }));
+  emitGraphNodeTap("cryptography");
+  fireEvent.click(await screen.findByRole("button", { name: "Filter notes by focused graph item" }));
 
   const notesPanel = screen.getByLabelText("Notes panel");
   expect(await within(notesPanel).findByText("Cryptography note")).toBeInTheDocument();
@@ -615,7 +703,8 @@ test("graph filtering shows a loading state while matching notes are loading", a
   render(<App />);
 
   fireEvent.keyDown(window, { key: "ArrowLeft" });
-  fireEvent.click(await screen.findByRole("button", { name: "Filter notes by how to download the images" }));
+  emitGraphNodeTap("how to download the images");
+  fireEvent.click(await screen.findByRole("button", { name: "Filter notes by focused graph item" }));
 
   expect(await screen.findByText("Loading notes for this graph filter...")).toBeInTheDocument();
   expect(screen.queryByLabelText("Notes list")).not.toBeInTheDocument();
@@ -652,9 +741,8 @@ test("graph filtering shows an empty state when no notes match", async () => {
   render(<App />);
 
   fireEvent.keyDown(window, { key: "ArrowLeft" });
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Filter notes by black box image classification challenge" }),
-  );
+  emitGraphNodeTap("black box image classification challenge");
+  fireEvent.click(await screen.findByRole("button", { name: "Filter notes by focused graph item" }));
 
   expect(await screen.findByText("No notes match this graph filter yet.")).toBeInTheDocument();
   expect(screen.queryByLabelText("Notes list")).not.toBeInTheDocument();

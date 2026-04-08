@@ -23,6 +23,20 @@ const mockLookupUrlLabels = vi.fn();
 const mockSearchNotes = vi.fn();
 const mockFilterNotesByTextContexts = vi.fn();
 const mockPickImageFile = vi.fn();
+const mockCreateCytoscape = vi.hoisted(() =>
+  vi.fn(() => ({
+    destroy: vi.fn(),
+    fit: vi.fn(),
+    layout: vi.fn(() => ({ run: vi.fn() })),
+    off: vi.fn(),
+    on: vi.fn(),
+    resize: vi.fn(),
+  })),
+);
+
+vi.mock("cytoscape", () => ({
+  default: mockCreateCytoscape,
+}));
 
 vi.mock("../lib/tauri", () => ({
   bootstrapWorkspace: () => mockBootstrapWorkspace(),

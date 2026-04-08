@@ -541,11 +541,12 @@ textarea {
 }
 
 .concept-graph-panel__body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
   height: 100%;
   min-height: 0;
-  overflow-y: auto;
-  padding-right: 4px;
-  scrollbar-gutter: stable;
+  overflow: hidden;
 }
 
 .concept-graph-panel__body:focus-visible {
@@ -553,10 +554,24 @@ textarea {
   outline-offset: 4px;
 }
 
+.concept-graph-panel__toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .concept-graph-panel__status,
 .concept-graph-panel__empty {
   margin: 0;
   color: var(--muted);
+}
+
+.concept-graph-panel__canvas {
+  min-height: 0;
+  height: 100%;
+  border: 1px solid var(--line);
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.48), transparent 38%),
+    rgba(255, 255, 255, 0.22);
 }
 
 .concept-graph-panel__section {

@@ -1,3 +1,6 @@
+import cytoscape, { type ElementDefinition, type StylesheetJson } from "cytoscape";
+import { useEffect, useRef } from "react";
+
 import type { KnownTextContext, TextContextRelationship } from "../lib/types";
 
 type ConceptGraphSelection = {
@@ -28,8 +31,76 @@ export function ConceptGraphPanel({
   textContextRelationships,
   selection,
 }: ConceptGraphPanelProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const relatedLabels = new Set(selection.textContextLabels.map(normalizeTextContextLabel));
   const selectedContextCount = selection.textContextLabels.length;
+  const graphElements = buildGraphElements(
+    knownTextContexts,
+    textContextRelationships,
+    relatedLabels,
+    focusedItem,
+  );
+
+  useEffect(() => {
+    if (!active || !containerRef.current) {
+      return;
+    }
+
+    const cy = cytoscape({
+      container: containerRef.current,
+      elements: graphElements,
+      layout: {
+        animate: false,
+        fit: true,
+        name: "cose",
+        padding: 18,
+      },
+      style: graphStylesheet,
+      userZoomingEnabled: false,
+    });
+
+    cy.on("tap", "node", (event) => {
+      const label = event.target.data("label");
+      if (typeof label === "string") {
+        onFocusSelect({ kind: "text_context", label });
+      }
+    });
+
+    cy.on("tap", "edge", (event) => {
+      const left = event.target.data("left");
+      const right = event.target.data("right");
+
+      if (typeof left === "string" && typeof right === "string") {
+        onFocusSelect({ kind: "relationship", left, right });
+      }
+    });
+
+    cy.on("mouseover", "node", (event) => {
+      event.target.addClass?.("is-hovered");
+    });
+    cy.on("mouseout", "node", (event) => {
+      event.target.removeClass?.("is-hovered");
+    });
+    cy.on("mouseover", "edge", (event) => {
+      event.target.addClass?.("is-hovered");
+    });
+    cy.on("mouseout", "edge", (event) => {
+      event.target.removeClass?.("is-hovered");
+    });
+
+    cy.layout({
+      animate: false,
+      fit: true,
+      name: "cose",
+      padding: 18,
+    }).run();
+    cy.resize();
+    cy.fit(undefined, 18);
+
+    return () => {
+      cy.destroy();
+    };
+  }, [active, graphElements, onFocusSelect]);
 
   return (
     <section aria-label="Concept Graph panel" className="panel panel-left concept-graph-panel" data-active={active}>
@@ -45,129 +116,96 @@ export function ConceptGraphPanel({
 
       {active ? (
         <div aria-label="Concept graph details" className="concept-graph-panel__body" tabIndex={0}>
-          <div className="concept-graph-panel__columns">
-          <section aria-label="Concept graph nodes" className="concept-graph-panel__section">
-            <p className="panel-subtle-title">Nodes</p>
-            <div className="concept-graph-panel__list">
-              {knownTextContexts.length > 0 ? (
-                knownTextContexts.map((context) => {
-                  const related = relatedLabels.has(normalizeTextContextLabel(context.label));
-                  const focused =
-                    focusedItem?.kind === "text_context" &&
-                    normalizeTextContextLabel(focusedItem.label) === normalizeTextContextLabel(context.label);
-
-                  return (
-                    <div
-                      key={context.normalizedLabel}
-                      className="concept-node"
-                      data-focused={focused}
-                      data-related={related}
-                    >
-                      <div className="concept-graph-panel__actions">
-                        <button
-                          aria-label={`Filter notes by ${context.label}`}
-                          className="concept-graph-panel__filter"
-                          type="button"
-                          onClick={() => onFilterSelect({ kind: "text_context", label: context.label })}
-                        >
-                          filter
-                        </button>
-                        <button
-                          aria-label={`Focus ${context.label}`}
-                          className="concept-graph-panel__action"
-                          data-related={related}
-                          data-testid="concept-node-label"
-                          type="button"
-                          onClick={() => onFocusSelect({ kind: "text_context", label: context.label })}
-                        >
-                          {context.label}
-                        </button>
-                      </div>
-                      <span className="concept-node__count">{context.useCount}</span>
-                    </div>
-                  );
-                })
-              ) : (
-                <p className="concept-graph-panel__empty">No context nodes yet.</p>
-              )}
-            </div>
-          </section>
-
-          <section aria-label="Concept graph edges" className="concept-graph-panel__section">
-            <p className="panel-subtle-title">Edges</p>
-            <div className="concept-graph-panel__list">
-              {textContextRelationships.length > 0 ? (
-                textContextRelationships.map((relationship) => {
-                  const related = isRelatedRelationship(relationship.left, relationship.right, relatedLabels);
-                  const focused =
-                    focusedItem?.kind === "relationship" &&
-                    normalizeTextContextLabel(focusedItem.left) === normalizeTextContextLabel(relationship.left) &&
-                    normalizeTextContextLabel(focusedItem.right) === normalizeTextContextLabel(relationship.right);
-
-                  return (
-                    <div
-                      key={`${relationship.left}-${relationship.right}`}
-                      className="concept-edge"
-                      data-focused={focused}
-                      data-related={related}
-                    >
-                      <div className="concept-graph-panel__actions">
-                        <button
-                          aria-label={`Focus ${relationship.left} <> ${relationship.right}`}
-                          className="concept-graph-panel__action"
-                          data-related={related}
-                          data-testid="concept-edge-label"
-                          type="button"
-                          onClick={() =>
-                            onFocusSelect({
-                              kind: "relationship",
-                              left: relationship.left,
-                              right: relationship.right,
-                            })
-                          }
-                        >
-                          {relationship.left} {"<>"} {relationship.right}
-                        </button>
-                        <button
-                          aria-label={`Filter notes by ${relationship.left} and ${relationship.right}`}
-                          className="concept-graph-panel__filter"
-                          type="button"
-                          onClick={() =>
-                            onFilterSelect({
-                              kind: "relationship",
-                              left: relationship.left,
-                              right: relationship.right,
-                            })
-                          }
-                        >
-                          filter
-                        </button>
-                      </div>
-                      <span className="concept-edge__count">{relationship.useCount}</span>
-                    </div>
-                  );
-                })
-              ) : (
-                <p className="concept-graph-panel__empty">No relationships yet.</p>
-              )}
-            </div>
-          </section>
+          <div className="concept-graph-panel__toolbar">
+            <button
+              aria-label="Filter notes by focused graph item"
+              className="concept-graph-panel__filter"
+              disabled={!focusedItem}
+              type="button"
+              onClick={() => {
+                if (focusedItem) {
+                  onFilterSelect(focusedItem);
+                }
+              }}
+            >
+              filter focused item
+            </button>
           </div>
+          <div
+            ref={containerRef}
+            aria-hidden={graphElements.length === 0}
+            className="concept-graph-panel__canvas"
+            data-testid="concept-graph-canvas"
+          />
+          {graphElements.length === 0 ? (
+            <p className="concept-graph-panel__empty">No graph data yet.</p>
+          ) : null}
         </div>
       ) : null}
     </section>
   );
 }
 
-function normalizeTextContextLabel(value: string) {
-  return value.trim().toLowerCase();
+function buildGraphElements(
+  knownTextContexts: KnownTextContext[],
+  textContextRelationships: TextContextRelationship[],
+  relatedLabels: Set<string>,
+  focusedItem: ConceptGraphFilter | null,
+): ElementDefinition[] {
+  return [
+    ...knownTextContexts.map((context) => {
+      const normalizedLabel = normalizeTextContextLabel(context.label);
+      const focused =
+        focusedItem?.kind === "text_context" &&
+        normalizeTextContextLabel(focusedItem.label) === normalizedLabel;
+
+      return {
+        data: {
+          id: `text_context:${context.normalizedLabel}`,
+          kind: "text_context",
+          label: context.label,
+          useCount: context.useCount,
+        },
+        classes: buildGraphClasses({
+          focused,
+          related: relatedLabels.has(normalizedLabel),
+        }),
+      } satisfies ElementDefinition;
+    }),
+    ...textContextRelationships.map((relationship) => {
+      const left = normalizeTextContextLabel(relationship.left);
+      const right = normalizeTextContextLabel(relationship.right);
+      const focused =
+        focusedItem?.kind === "relationship" &&
+        normalizeTextContextLabel(focusedItem.left) === left &&
+        normalizeTextContextLabel(focusedItem.right) === right;
+
+      return {
+        data: {
+          id: `relationship:${left}::${right}`,
+          kind: "relationship",
+          label: `${relationship.left} <> ${relationship.right}`,
+          left: relationship.left,
+          right: relationship.right,
+          source: `text_context:${left}`,
+          target: `text_context:${right}`,
+          useCount: relationship.useCount,
+        },
+        classes: buildGraphClasses({
+          focused,
+          related: relatedLabels.has(left) && relatedLabels.has(right),
+        }),
+      } satisfies ElementDefinition;
+    }),
+  ];
 }
 
-function isRelatedRelationship(left: string, right: string, relatedLabels: Set<string>) {
-  return (
-    relatedLabels.has(normalizeTextContextLabel(left)) &&
-    relatedLabels.has(normalizeTextContextLabel(right))
-  );
+function buildGraphClasses({ related, focused }: { related: boolean; focused: boolean }) {
+  return [related ? "is-related" : "", focused ? "is-focused" : ""].filter(Boolean).join(" ");
+}
+
+function normalizeTextContextLabel(value: string) {
+  return value.trim().toLowerCase();
 }
 
 function formatFocusLabel(target: ConceptGraphFilter) {
@@ -177,3 +215,69 @@ function formatFocusLabel(target: ConceptGraphFilter) {
 
   return `${target.left} + ${target.right}`;
 }
+
+const graphStylesheet: StylesheetJson = [
+  {
+    selector: "node",
+    style: {
+      "background-color": "#d6d2c4",
+      "border-color": "#7b7468",
+      "border-width": "1",
+      color: "#16171a",
+      content: "data(label)",
+      "font-family": "Departure Mono, monospace",
+      "font-size": "10",
+      height: "34",
+      label: "data(label)",
+      padding: "8px",
+      shape: "round-rectangle",
+      "text-halign": "center",
+      "text-max-width": "140",
+      "text-valign": "center",
+      "text-wrap": "wrap",
+      width: "120",
+    },
+  },
+  {
+    selector: "edge",
+    style: {
+      "curve-style": "bezier",
+      "font-family": "Departure Mono, monospace",
+      "font-size": "9",
+      "line-color": "#b7b0a1",
+      "target-arrow-color": "#b7b0a1",
+      "target-arrow-shape": "triangle",
+      width: "2",
+    },
+  },
+  {
+    selector: ".is-related",
+    style: {
+      "background-color": "#a7d8bc",
+      "border-color": "#238b63",
+      color: "#16171a",
+      "line-color": "#238b63",
+      "target-arrow-color": "#238b63",
+    },
+  },
+  {
+    selector: ".is-focused",
+    style: {
+      "background-color": "#f4efe3",
+      "border-color": "#16171a",
+      "border-width": "2",
+      color: "#16171a",
+      "line-color": "#16171a",
+      "target-arrow-color": "#16171a",
+      width: "3",
+    },
+  },
+  {
+    selector: ".is-hovered",
+    style: {
+      "background-color": "#efe7d5",
+      "line-color": "#5a5248",
+      "target-arrow-color": "#5a5248",
+    },
+  },
+];
