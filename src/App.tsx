@@ -61,6 +61,10 @@ export default function App() {
   const [textContextRelationships, setTextContextRelationships] = useState<TextContextRelationship[]>([]);
   const [editableTextContexts, setEditableTextContexts] = useState<EditableTextContext[]>([]);
   const [textContextDrafts, setTextContextDrafts] = useState<Record<string, string>>({});
+  // Cross-view contract for issue #23:
+  // - note selection is the only export-targeting state
+  // - graph focus is visual context only
+  // - graph filtering changes visible notes explicitly, without auto-selecting them
   const [crossViewSelection, setCrossViewSelection] = useState<CrossViewSelection>({
     noteIds: [],
     textContextLabels: [],
