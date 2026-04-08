@@ -143,7 +143,7 @@ export function HistoryPanel({
           disabled={!active || selected.size === 0}
           onClick={onExport}
         >
-          Export selected
+          Export checked notes
         </button>
       </div>
       {filterLabel ? (

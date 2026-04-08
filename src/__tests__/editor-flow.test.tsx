@@ -458,7 +458,7 @@ test("selected notes can be exported as markdown", async () => {
   fireEvent.keyDown(window, { key: "ArrowDown" });
   fireEvent.click(screen.getByLabelText("Select Older note"));
   fireEvent.click(screen.getByLabelText("Select Newer note"));
-  fireEvent.click(screen.getByRole("button", { name: "Export selected" }));
+  fireEvent.click(screen.getByRole("button", { name: "Export checked notes" }));
 
   expect(mockExportNotesMarkdown).toHaveBeenCalledWith(["older-note", "newer-note"]);
 });
@@ -607,7 +607,7 @@ test("search results can still be selected exported and deleted", async () => {
 
   fireEvent.click(screen.getByLabelText("Select search result 1"));
   fireEvent.click(screen.getByLabelText("Select search result 2"));
-  fireEvent.click(screen.getByRole("button", { name: "Export selected" }));
+  fireEvent.click(screen.getByRole("button", { name: "Export checked notes" }));
   fireEvent.click(screen.getByRole("button", { name: "Delete search result 2" }));
 
   expect(mockExportNotesMarkdown).toHaveBeenCalledWith(["note-a", "note-b"]);

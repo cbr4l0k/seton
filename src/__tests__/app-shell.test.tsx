@@ -477,7 +477,7 @@ test("graph focus stays separate from note selection and filtering", async () =>
   expect(within(notesPanel).queryByText("Systems note")).not.toBeInTheDocument();
   expect(await within(notesPanel).findByLabelText("Select Cryptography note")).not.toBeChecked();
   expect(within(notesPanel).getByLabelText("Select Elliptic note")).not.toBeChecked();
-  expect(within(notesPanel).getByRole("button", { name: "Export selected" })).toBeEnabled();
+  expect(within(notesPanel).getByRole("button", { name: "Export checked notes" })).toBeEnabled();
 
   fireEvent.keyDown(window, { key: "ArrowLeft" });
   fireEvent.click(await screen.findByRole("button", { name: "Focus cryptography <> number theory" }));
@@ -490,7 +490,7 @@ test("graph focus stays separate from note selection and filtering", async () =>
   expect(await within(notesPanel).findByLabelText("Select Cryptography note")).not.toBeChecked();
   expect(within(notesPanel).queryByText("Elliptic note")).not.toBeInTheDocument();
   expect(within(notesPanel).queryByText("Systems note")).not.toBeInTheDocument();
-  expect(within(notesPanel).getByRole("button", { name: "Export selected" })).toBeEnabled();
+  expect(within(notesPanel).getByRole("button", { name: "Export checked notes" })).toBeEnabled();
 
   fireEvent.click(within(notesPanel).getByRole("button", { name: "Clear graph filter" }));
 
@@ -534,6 +534,49 @@ test("graph filtering delegates note lookup to the text-context backend path", a
   const notesPanel = screen.getByLabelText("Notes panel");
   expect(notesPanel).toHaveAttribute("data-active", "true");
   expect(filterNotesByTextContexts).toHaveBeenCalledWith(["how to download the images"]);
+});
+
+test("graph filtering alone does not enable export", async () => {
+  vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
+    history: [
+      {
+        id: "recent-1",
+        preview: "Recent note",
+        lastOpenedAt: null,
+        updatedAt: "2026-04-08T10:00:00Z",
+        textContextLabels: ["cryptography"],
+      },
+    ],
+    placeholders: [],
+    knownTextContexts: [
+      {
+        label: "cryptography",
+        normalizedLabel: "cryptography",
+        useCount: 1,
+      },
+    ],
+    textContextRelationships: [],
+    editableTextContexts: [],
+  });
+  vi.mocked(filterNotesByTextContexts).mockResolvedValueOnce([
+    {
+      id: "note-1",
+      preview: "Cryptography note",
+      lastOpenedAt: null,
+      updatedAt: "2026-04-08T10:00:00Z",
+      textContextLabels: ["cryptography"],
+    },
+  ]);
+
+  render(<App />);
+
+  fireEvent.keyDown(window, { key: "ArrowLeft" });
+  fireEvent.click(await screen.findByRole("button", { name: "Filter notes by cryptography" }));
+
+  const notesPanel = screen.getByLabelText("Notes panel");
+  expect(await within(notesPanel).findByText("Cryptography note")).toBeInTheDocument();
+  expect(within(notesPanel).getByRole("button", { name: "Export checked notes" })).toBeDisabled();
+  expect(within(notesPanel).getByLabelText("Select Cryptography note")).not.toBeChecked();
 });
 
 test("graph filtering shows a loading state while matching notes are loading", async () => {
