@@ -447,23 +447,15 @@ export default function App() {
   }
 
   function handleGraphFilterSelect(graphFilter: GraphFilter) {
-    setCrossViewSelection((current) =>
-      buildCrossViewSelection(current.noteIds, historyItems, searchResults, graphFilter),
-    );
+    const nextNoteIds = collectMatchingNoteIds(historyItems, searchResults, graphFilter);
+    setCrossViewSelection(buildCrossViewSelection(nextNoteIds, historyItems, searchResults, graphFilter));
     setActiveSearchIndex(0);
     setPosition("bottom");
   }
 
   function handleClearGraphFilter() {
-    setCrossViewSelection((current) =>
-      buildCrossViewSelection(current.noteIds, historyItems, searchResults, null),
-    );
+    setCrossViewSelection(buildCrossViewSelection([], historyItems, searchResults, null));
   }
-
-  const filteredHistoryItems = historyItems.filter((item) => matchesGraphFilter(item, crossViewSelection.graphFilter));
-  const filteredSearchResults = searchResults.filter((item) =>
-    matchesGraphFilter(item, crossViewSelection.graphFilter),
-  );
 
   return (
     <WorkspaceCanvas position={position}>
@@ -615,7 +607,7 @@ export default function App() {
         active={position === "bottom"}
         activeSearchIndex={activeSearchIndex}
         filterLabel={formatGraphFilterLabel(crossViewSelection.graphFilter)}
-        items={filteredHistoryItems}
+        items={historyItems}
         onClearFilter={handleClearGraphFilter}
         onDelete={(noteId) => void handleDeleteNote(noteId)}
         onExport={() => void handleExportSelectedNotes()}
@@ -624,7 +616,7 @@ export default function App() {
         onSearchQueryChange={setSearchQuery}
         onSelectionChange={handleHistorySelectionChange}
         searchQuery={searchQuery}
-        searchResults={filteredSearchResults}
+        searchResults={searchResults}
         selectedNoteIds={crossViewSelection.noteIds}
       />
 
@@ -775,6 +767,26 @@ function matchesGraphFilter(
     labels.has(normalizeTextContextLabel(graphFilter.left)) &&
     labels.has(normalizeTextContextLabel(graphFilter.right))
   );
+}
+
+function collectMatchingNoteIds(
+  historyItems: RecentNote[],
+  searchResults: NoteSearchResult[],
+  graphFilter: GraphFilter,
+) {
+  const allItems = new Map<string, RecentNote | NoteSearchResult>();
+
+  for (const item of historyItems) {
+    allItems.set(item.id, item);
+  }
+
+  for (const item of searchResults) {
+    allItems.set(item.id, item);
+  }
+
+  return [...allItems.values()]
+    .filter((item) => matchesGraphFilter(item, graphFilter))
+    .map((item) => item.id);
 }
 
 function formatGraphFilterLabel(graphFilter: GraphFilter | null) {
