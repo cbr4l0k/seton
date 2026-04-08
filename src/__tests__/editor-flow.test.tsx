@@ -21,6 +21,7 @@ const mockRefreshFailedUrlTitles = vi.fn();
 const mockRefreshAllUrlTitles = vi.fn();
 const mockLookupUrlLabels = vi.fn();
 const mockSearchNotes = vi.fn();
+const mockFilterNotesByTextContexts = vi.fn();
 const mockPickImageFile = vi.fn();
 
 vi.mock("../lib/tauri", () => ({
@@ -34,6 +35,7 @@ vi.mock("../lib/tauri", () => ({
   saveNote: (input: unknown) => mockSaveNote(input),
   openNote: (noteId: string) => mockOpenNote(noteId),
   searchNotes: (query: string) => mockSearchNotes(query),
+  filterNotesByTextContexts: (labels: string[]) => mockFilterNotesByTextContexts(labels),
   pickImageFile: () => mockPickImageFile(),
 }));
 
@@ -144,8 +146,10 @@ beforeEach(() => {
   mockRefreshAllUrlTitles.mockReset();
   mockLookupUrlLabels.mockReset();
   mockSearchNotes.mockReset();
+  mockFilterNotesByTextContexts.mockReset();
   mockPickImageFile.mockReset();
   mockOpenNote.mockResolvedValue(makeSavedNoteDetail());
+  mockFilterNotesByTextContexts.mockResolvedValue([]);
 });
 
 test("settings can rename a shared text context and refresh suggestions", async () => {

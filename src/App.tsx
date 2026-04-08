@@ -13,6 +13,7 @@ import {
   bootstrapWorkspace,
   deleteNote,
   exportNotesMarkdown,
+  filterNotesByTextContexts,
   openNote,
   renameTextContext,
   refreshAllUrlTitles,
@@ -66,6 +67,7 @@ export default function App() {
   });
   const [graphFocus, setGraphFocus] = useState<GraphTarget | null>(null);
   const [graphFilter, setGraphFilter] = useState<GraphTarget | null>(null);
+  const [graphFilteredItems, setGraphFilteredItems] = useState<RecentNote[] | null>(null);
   const [currentNoteId, setCurrentNoteId] = useState<string | null>(null);
   const [requestAnalysisAfterSave, setRequestAnalysisAfterSave] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -77,6 +79,7 @@ export default function App() {
     body: "",
     contexts: [],
   });
+  const graphFilterRequestId = useRef(0);
 
   useEffect(() => {
     if (position === "center") {
@@ -279,6 +282,7 @@ export default function App() {
         searchResults,
       ),
     );
+    setGraphFilteredItems((current) => current?.filter((item) => item.id !== noteId) ?? null);
 
     if (currentNoteId === noteId) {
       setCurrentNoteId(null);
@@ -433,11 +437,6 @@ export default function App() {
     }
   }
 
-  const filteredHistoryItems = historyItems.filter((item) => matchesGraphTarget(item, graphFilter));
-  const filteredSearchResults = searchResults.filter((item) =>
-    matchesGraphTarget(item, graphFilter, historyItems),
-  );
-
   function handleHistorySelectionChange(noteId: string, checked: boolean) {
     setCrossViewSelection((current) => {
       const nextNoteIds = checked
@@ -454,14 +453,37 @@ export default function App() {
     setGraphFocus(target);
   }
 
-  function handleGraphFilterSelect(target: GraphTarget) {
+  async function handleGraphFilterSelect(target: GraphTarget) {
+    const nextRequestId = graphFilterRequestId.current + 1;
+    graphFilterRequestId.current = nextRequestId;
     setGraphFilter(target);
+    setGraphFilteredItems([]);
     setActiveSearchIndex(0);
     setPosition("bottom");
+
+    try {
+      const matchingNotes = await filterNotesByTextContexts(
+        target.kind === "text_context" ? [target.label] : [target.left, target.right],
+      );
+
+      if (graphFilterRequestId.current !== nextRequestId) {
+        return;
+      }
+
+      setGraphFilteredItems(matchingNotes.map(formatHistoryItem));
+    } catch {
+      if (graphFilterRequestId.current !== nextRequestId) {
+        return;
+      }
+
+      setGraphFilteredItems([]);
+    }
   }
 
   function handleClearGraphFilter() {
+    graphFilterRequestId.current += 1;
     setGraphFilter(null);
+    setGraphFilteredItems(null);
   }
 
   return (
@@ -590,7 +612,7 @@ export default function App() {
         focusedItem={graphFocus}
         knownTextContexts={knownTextContexts}
         onFocusSelect={handleGraphFocus}
-        onFilterSelect={handleGraphFilterSelect}
+        onFilterSelect={(target) => void handleGraphFilterSelect(target)}
         selection={crossViewSelection}
         textContextRelationships={textContextRelationships}
       />
@@ -616,7 +638,7 @@ export default function App() {
         active={position === "bottom"}
         activeSearchIndex={activeSearchIndex}
         filterLabel={formatGraphFilterLabel(graphFilter)}
-        items={filteredHistoryItems}
+        items={graphFilter ? graphFilteredItems ?? [] : historyItems}
         onClearFilter={handleClearGraphFilter}
         onDelete={(noteId) => void handleDeleteNote(noteId)}
         onExport={() => void handleExportSelectedNotes()}
@@ -624,8 +646,8 @@ export default function App() {
         onSearchActiveIndexChange={setActiveSearchIndex}
         onSearchQueryChange={setSearchQuery}
         onSelectionChange={handleHistorySelectionChange}
-        searchQuery={searchQuery}
-        searchResults={filteredSearchResults}
+        searchQuery={graphFilter ? "" : searchQuery}
+        searchResults={graphFilter ? [] : searchResults}
         selectedNoteIds={crossViewSelection.noteIds}
       />
 
@@ -754,38 +776,6 @@ function buildCrossViewSelection(
 
 function normalizeTextContextLabel(value: string) {
   return value.trim().toLowerCase();
-}
-
-function matchesGraphTarget(
-  item: Pick<RecentNote, "id" | "textContextLabels"> | Pick<NoteSearchResult, "id" | "textContextLabels">,
-  graphTarget: GraphTarget | null,
-  historyItems: RecentNote[] = [],
-) {
-  if (!graphTarget) {
-    return true;
-  }
-
-  const labels = new Set(resolveTextContextLabels(item, historyItems).map(normalizeTextContextLabel));
-
-  if (graphTarget.kind === "text_context") {
-    return labels.has(normalizeTextContextLabel(graphTarget.label));
-  }
-
-  return (
-    labels.has(normalizeTextContextLabel(graphTarget.left)) &&
-    labels.has(normalizeTextContextLabel(graphTarget.right))
-  );
-}
-
-function resolveTextContextLabels(
-  item: Pick<RecentNote, "id" | "textContextLabels"> | Pick<NoteSearchResult, "id" | "textContextLabels">,
-  historyItems: RecentNote[],
-) {
-  if (item.textContextLabels && item.textContextLabels.length > 0) {
-    return item.textContextLabels;
-  }
-
-  return historyItems.find((historyItem) => historyItem.id === item.id)?.textContextLabels ?? [];
 }
 
 function formatGraphFilterLabel(graphFilter: GraphTarget | null) {

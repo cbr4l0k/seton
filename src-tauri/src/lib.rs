@@ -29,6 +29,7 @@ pub fn run() {
             commands::workspace::open_note,
             commands::workspace::delete_note,
             commands::workspace::search_notes,
+            commands::workspace::filter_notes_by_text_contexts,
             commands::workspace::rename_text_context,
             commands::workspace::export_notes_markdown,
             commands::workspace::refresh_failed_url_titles,

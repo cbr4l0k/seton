@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
-import type { NoteDetail, NoteSearchResult, SaveNoteRequest, UrlLabelLookup, WorkspacePayload } from "./types";
+import type { NoteDetail, NoteSearchResult, RecentNote, SaveNoteRequest, UrlLabelLookup, WorkspacePayload } from "./types";
 
 export async function bootstrapWorkspace(): Promise<WorkspacePayload> {
   return invoke<WorkspacePayload>("bootstrap_workspace");
@@ -21,6 +21,12 @@ export async function deleteNote(noteId: string): Promise<void> {
 
 export async function searchNotes(query: string): Promise<NoteSearchResult[]> {
   return invoke<NoteSearchResult[]>("search_notes", { query });
+}
+
+export async function filterNotesByTextContexts(labels: string[]): Promise<RecentNote[]> {
+  return invoke<RecentNote[]>("filter_notes_by_text_contexts", {
+    input: { labels },
+  });
 }
 
 export async function renameTextContext(textContextId: string, label: string): Promise<void> {

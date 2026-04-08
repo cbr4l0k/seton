@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import App from "../App";
 import departureMonoFontUrl from "../assets/fonts/DepartureMono-Regular.woff2?url";
-import { bootstrapWorkspace, searchNotes } from "../lib/tauri";
+import { bootstrapWorkspace, filterNotesByTextContexts, searchNotes } from "../lib/tauri";
 
 type MarkdownEditorTestApi = {
   focus: () => void;
@@ -24,6 +24,7 @@ vi.mock("../lib/tauri", () => ({
   saveNote: vi.fn(),
   openNote: vi.fn(),
   searchNotes: vi.fn().mockResolvedValue([]),
+  filterNotesByTextContexts: vi.fn().mockResolvedValue([]),
   pickImageFile: vi.fn(),
 }));
 
@@ -36,6 +37,7 @@ beforeEach(() => {
     editableTextContexts: [],
   });
   vi.mocked(searchNotes).mockResolvedValue([]);
+  vi.mocked(filterNotesByTextContexts).mockResolvedValue([]);
 });
 
 function getThoughtEditor() {
@@ -71,7 +73,7 @@ test("bundles Departure Mono from a local asset", () => {
 });
 
 test("opens settings as a dedicated front panel", async () => {
-  vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
+  vi.mocked(bootstrapWorkspace).mockResolvedValue({
     history: [],
     placeholders: [],
     knownTextContexts: [],
@@ -91,7 +93,7 @@ test("opens settings as a dedicated front panel", async () => {
 });
 
 test("escape closes the settings dialog", async () => {
-  vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
+  vi.mocked(bootstrapWorkspace).mockResolvedValue({
     history: [],
     placeholders: [],
     knownTextContexts: [],
@@ -408,6 +410,32 @@ test("graph focus stays separate from note selection and filtering", async () =>
     ],
     editableTextContexts: [],
   });
+  vi.mocked(filterNotesByTextContexts)
+    .mockResolvedValueOnce([
+      {
+        id: "note-1",
+        preview: "Cryptography note",
+        lastOpenedAt: null,
+        updatedAt: "2026-04-08T10:00:00Z",
+        textContextLabels: ["cryptography", "number theory"],
+      },
+      {
+        id: "note-3",
+        preview: "Elliptic note",
+        lastOpenedAt: null,
+        updatedAt: "2026-04-08T12:00:00Z",
+        textContextLabels: ["cryptography", "elliptic curves"],
+      },
+    ])
+    .mockResolvedValueOnce([
+      {
+        id: "note-1",
+        preview: "Cryptography note",
+        lastOpenedAt: null,
+        updatedAt: "2026-04-08T10:00:00Z",
+        textContextLabels: ["cryptography", "number theory"],
+      },
+    ]);
 
   render(<App />);
 
@@ -429,12 +457,14 @@ test("graph focus stays separate from note selection and filtering", async () =>
   expect(within(notesPanel).getByLabelText("Select Elliptic note")).not.toBeChecked();
 
   fireEvent.keyDown(window, { key: "ArrowLeft" });
-  fireEvent.click(await screen.findByRole("button", { name: "Filter notes by cryptography" }));
+  await act(async () => {
+    fireEvent.click(await screen.findByRole("button", { name: "Filter notes by cryptography" }));
+  });
 
   expect(notesPanel).toHaveAttribute("data-active", "true");
   expect(within(notesPanel).getByText("Filtered by cryptography")).toBeInTheDocument();
   expect(within(notesPanel).queryByText("Systems note")).not.toBeInTheDocument();
-  expect(within(notesPanel).getByLabelText("Select Cryptography note")).not.toBeChecked();
+  expect(await within(notesPanel).findByLabelText("Select Cryptography note")).not.toBeChecked();
   expect(within(notesPanel).getByLabelText("Select Elliptic note")).not.toBeChecked();
   expect(within(notesPanel).getByRole("button", { name: "Export selected" })).toBeEnabled();
 
@@ -442,9 +472,11 @@ test("graph focus stays separate from note selection and filtering", async () =>
   fireEvent.click(await screen.findByRole("button", { name: "Focus cryptography <> number theory" }));
   expect(within(graphPanel).getByText("Focused: cryptography + number theory")).toBeInTheDocument();
 
-  fireEvent.click(await screen.findByRole("button", { name: "Filter notes by cryptography and number theory" }));
+  await act(async () => {
+    fireEvent.click(await screen.findByRole("button", { name: "Filter notes by cryptography and number theory" }));
+  });
   expect(within(notesPanel).getByText("Filtered by cryptography + number theory")).toBeInTheDocument();
-  expect(within(notesPanel).getByLabelText("Select Cryptography note")).not.toBeChecked();
+  expect(await within(notesPanel).findByLabelText("Select Cryptography note")).not.toBeChecked();
   expect(within(notesPanel).queryByText("Elliptic note")).not.toBeInTheDocument();
   expect(within(notesPanel).queryByText("Systems note")).not.toBeInTheDocument();
   expect(within(notesPanel).getByRole("button", { name: "Export selected" })).toBeEnabled();
@@ -457,4 +489,38 @@ test("graph focus stays separate from note selection and filtering", async () =>
   expect(within(notesPanel).getByLabelText("Select Cryptography note")).not.toBeChecked();
   expect(within(notesPanel).getByLabelText("Select Elliptic note")).not.toBeChecked();
   expect(within(notesPanel).getByLabelText("Select Systems note")).toBeChecked();
+});
+
+test("graph filtering delegates note lookup to the text-context backend path", async () => {
+  vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
+    history: [
+      {
+        id: "recent-1",
+        preview: "Recent note",
+        lastOpenedAt: null,
+        updatedAt: "2026-04-08T10:00:00Z",
+        textContextLabels: ["cryptography"],
+      },
+    ],
+    placeholders: [],
+    knownTextContexts: [
+      {
+        label: "how to download the images",
+        normalizedLabel: "how to download the images",
+        useCount: 1,
+      },
+    ],
+    textContextRelationships: [],
+    editableTextContexts: [],
+  });
+  vi.mocked(filterNotesByTextContexts).mockResolvedValue([]);
+
+  render(<App />);
+
+  fireEvent.keyDown(window, { key: "ArrowLeft" });
+  fireEvent.click(await screen.findByRole("button", { name: "Filter notes by how to download the images" }));
+
+  const notesPanel = screen.getByLabelText("Notes panel");
+  expect(notesPanel).toHaveAttribute("data-active", "true");
+  expect(filterNotesByTextContexts).toHaveBeenCalledWith(["how to download the images"]);
 });

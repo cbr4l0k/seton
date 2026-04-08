@@ -483,6 +483,7 @@ textarea {
   left: 24px;
   top: 50%;
   width: min(360px, calc(100vw - 48px));
+  height: min(540px, calc(100vh - 96px));
   transform: translate(-120%, -50%);
 }
 
@@ -525,9 +526,11 @@ textarea {
 
 .concept-graph-panel {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 14px;
   padding: 18px 18px 20px;
-  max-height: min(540px, calc(100vh - 96px));
+  height: 100%;
+  box-sizing: border-box;
   overflow: hidden;
 }
 
@@ -538,6 +541,7 @@ textarea {
 }
 
 .concept-graph-panel__body {
+  height: 100%;
   min-height: 0;
   overflow-y: auto;
   padding-right: 4px;
@@ -977,6 +981,7 @@ mark {
   .panel-left,
   .panel-right {
     top: 16px;
+    height: min(320px, calc(100vh - 64px));
     transform: translate(0, -120%);
   }
 

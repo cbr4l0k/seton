@@ -362,6 +362,75 @@ impl NoteRepository {
             .collect::<Vec<_>>())
     }
 
+    pub async fn list_notes_by_text_contexts(
+        &self,
+        labels: Vec<String>,
+        limit: i64,
+    ) -> Result<Vec<RecentNote>, String> {
+        let normalized_labels = labels
+            .into_iter()
+            .filter_map(|label| normalized_text_label(Some(&label)).map(|(_, normalized)| normalized))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        if normalized_labels.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT
+                notes.id,
+                notes.body,
+                notes.last_opened_at,
+                notes.updated_at
+             FROM notes
+             JOIN capture_contexts ON capture_contexts.note_id = notes.id
+             LEFT JOIN text_contexts ON text_contexts.id = capture_contexts.text_context_id
+             WHERE capture_contexts.context_type = 'text'
+               AND COALESCE(text_contexts.normalized_label, LOWER(TRIM(capture_contexts.text_value))) IN (",
+        );
+
+        {
+            let mut separated = query.separated(", ");
+            for label in &normalized_labels {
+                separated.push_bind(label);
+            }
+        }
+
+        query.push(
+            ")
+             GROUP BY notes.id, notes.body, notes.last_opened_at, notes.updated_at
+             HAVING COUNT(DISTINCT COALESCE(text_contexts.normalized_label, LOWER(TRIM(capture_contexts.text_value)))) = ",
+        );
+        query.push_bind(normalized_labels.len() as i64);
+        query.push(
+            " ORDER BY COALESCE(notes.last_opened_at, notes.updated_at) DESC, notes.updated_at DESC
+              LIMIT ",
+        );
+        query.push_bind(limit);
+
+        let rows = query
+            .build_query_as::<RecentNoteRow>()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|err| err.to_string())?;
+
+        let note_ids = rows.iter().map(|row| row.id.clone()).collect::<Vec<_>>();
+        let text_context_labels = self.load_note_text_context_labels(&note_ids).await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| RecentNote {
+                text_context_labels: text_context_labels.get(&row.id).cloned().unwrap_or_default(),
+                id: row.id,
+                preview: preview_text(&row.body),
+                last_opened_at: row.last_opened_at,
+                updated_at: row.updated_at,
+            })
+            .collect::<Vec<_>>())
+    }
+
     async fn load_note_text_context_labels(
         &self,
         note_ids: &[String],

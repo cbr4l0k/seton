@@ -65,6 +65,14 @@ export function ConceptGraphPanel({
                     >
                       <div className="concept-graph-panel__actions">
                         <button
+                          aria-label={`Filter notes by ${context.label}`}
+                          className="concept-graph-panel__filter"
+                          type="button"
+                          onClick={() => onFilterSelect({ kind: "text_context", label: context.label })}
+                        >
+                          filter
+                        </button>
+                        <button
                           aria-label={`Focus ${context.label}`}
                           className="concept-graph-panel__action"
                           data-related={related}
@@ -73,14 +81,6 @@ export function ConceptGraphPanel({
                           onClick={() => onFocusSelect({ kind: "text_context", label: context.label })}
                         >
                           {context.label}
-                        </button>
-                        <button
-                          aria-label={`Filter notes by ${context.label}`}
-                          className="concept-graph-panel__filter"
-                          type="button"
-                          onClick={() => onFilterSelect({ kind: "text_context", label: context.label })}
-                        >
-                          filter
                         </button>
                       </div>
                       <span className="concept-node__count">{context.useCount}</span>

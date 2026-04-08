@@ -144,6 +144,12 @@ pub struct LookupUrlLabelsRequest {
     pub urls: Vec<String>,
 }
 
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterNotesByTextContextsRequest {
+    pub labels: Vec<String>,
+}
+
 #[tauri::command]
 pub async fn bootstrap_workspace(
     state: tauri::State<'_, AppState>,
@@ -178,6 +184,14 @@ pub async fn search_notes(
     query: String,
 ) -> Result<Vec<NoteSearchResultDto>, String> {
     search_notes_with_state(state.inner(), query).await
+}
+
+#[tauri::command]
+pub async fn filter_notes_by_text_contexts(
+    state: tauri::State<'_, AppState>,
+    input: FilterNotesByTextContextsRequest,
+) -> Result<Vec<RecentNoteDto>, String> {
+    filter_notes_by_text_contexts_with_state(state.inner(), input).await
 }
 
 #[tauri::command]
@@ -292,6 +306,17 @@ pub async fn search_notes_with_state(
         .search_notes(query, 24)
         .await
         .map(|results| results.into_iter().map(NoteSearchResultDto::from).collect())
+}
+
+pub async fn filter_notes_by_text_contexts_with_state(
+    state: &AppState,
+    input: FilterNotesByTextContextsRequest,
+) -> Result<Vec<RecentNoteDto>, String> {
+    state
+        .repository
+        .list_notes_by_text_contexts(input.labels, 48)
+        .await
+        .map(|results| results.into_iter().map(RecentNoteDto::from).collect())
 }
 
 fn placeholder_panels() -> Vec<PlaceholderPanelDto> {
@@ -448,7 +473,10 @@ mod tests {
     use crate::db::schema::connect;
     use crate::domain::capture_context::CaptureContextInput;
 
-    use super::{bootstrap_workspace_with_state, search_notes_with_state};
+    use super::{
+        bootstrap_workspace_with_state, filter_notes_by_text_contexts_with_state,
+        search_notes_with_state, FilterNotesByTextContextsRequest,
+    };
 
     #[tokio::test]
     async fn bootstrap_workspace_returns_recent_notes() {
@@ -509,6 +537,24 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn filter_notes_by_text_contexts_returns_matches_outside_recent_history() {
+        let state = seeded_state_with_older_text_context_note().await;
+
+        let results = filter_notes_by_text_contexts_with_state(
+            &state,
+            FilterNotesByTextContextsRequest {
+                labels: vec!["how to download the images".into()],
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "older-context-note");
+        assert_eq!(results[0].preview, "How to download the images note");
+    }
+
     async fn seeded_state_with_recent_note() -> AppState {
         let temp = TempDir::new().unwrap();
         let root = temp.keep();
@@ -524,6 +570,30 @@ mod tests {
                 body: "Seed note".into(),
                 capture_contexts: vec![CaptureContextInput::Text {
                     text: "Seed context".into(),
+                }],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+
+        state
+    }
+
+    async fn seeded_state_with_older_text_context_note() -> AppState {
+        let temp = TempDir::new().unwrap();
+        let root = temp.keep();
+        let paths = build_app_paths(&root);
+        std::fs::create_dir_all(&paths.images_dir).unwrap();
+        let pool = connect(&paths).await.unwrap();
+        let state = AppState::from_parts(paths, pool);
+
+        state
+            .repository
+            .save_note(SaveNoteInput {
+                note_id: Some("older-context-note".into()),
+                body: "How to download the images note".into(),
+                capture_contexts: vec![CaptureContextInput::Text {
+                    text: "how to download the images".into(),
                 }],
                 request_analysis: false,
             })
