@@ -68,6 +68,7 @@ export default function App() {
   const [graphFocus, setGraphFocus] = useState<GraphTarget | null>(null);
   const [graphFilter, setGraphFilter] = useState<GraphTarget | null>(null);
   const [graphFilteredItems, setGraphFilteredItems] = useState<RecentNote[] | null>(null);
+  const [graphFilterLoading, setGraphFilterLoading] = useState(false);
   const [currentNoteId, setCurrentNoteId] = useState<string | null>(null);
   const [requestAnalysisAfterSave, setRequestAnalysisAfterSave] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -457,6 +458,7 @@ export default function App() {
     const nextRequestId = graphFilterRequestId.current + 1;
     graphFilterRequestId.current = nextRequestId;
     setGraphFilter(target);
+    setGraphFilterLoading(true);
     setGraphFilteredItems([]);
     setActiveSearchIndex(0);
     setPosition("bottom");
@@ -470,18 +472,21 @@ export default function App() {
         return;
       }
 
+      setGraphFilterLoading(false);
       setGraphFilteredItems(matchingNotes.map(formatHistoryItem));
     } catch {
       if (graphFilterRequestId.current !== nextRequestId) {
         return;
       }
 
+      setGraphFilterLoading(false);
       setGraphFilteredItems([]);
     }
   }
 
   function handleClearGraphFilter() {
     graphFilterRequestId.current += 1;
+    setGraphFilterLoading(false);
     setGraphFilter(null);
     setGraphFilteredItems(null);
   }
@@ -638,6 +643,7 @@ export default function App() {
         active={position === "bottom"}
         activeSearchIndex={activeSearchIndex}
         filterLabel={formatGraphFilterLabel(graphFilter)}
+        filterLoading={graphFilterLoading}
         items={graphFilter ? graphFilteredItems ?? [] : historyItems}
         onClearFilter={handleClearGraphFilter}
         onDelete={(noteId) => void handleDeleteNote(noteId)}
@@ -649,6 +655,15 @@ export default function App() {
         searchQuery={graphFilter ? "" : searchQuery}
         searchResults={graphFilter ? [] : searchResults}
         selectedNoteIds={crossViewSelection.noteIds}
+        statusMessage={
+          graphFilter
+            ? graphFilterLoading
+              ? "Loading notes for this graph filter..."
+              : (graphFilteredItems?.length ?? 0) === 0
+                ? "No notes match this graph filter yet."
+                : null
+            : null
+        }
       />
 
       {toastMessage ? <div className="save-toast">{toastMessage}</div> : null}

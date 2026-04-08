@@ -54,6 +54,17 @@ function focusThoughtEditor() {
   return editor;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+
+  return { promise, resolve, reject };
+}
+
 test("renders the Thought Inbox shell", () => {
   render(<App />);
   expect(getThoughtEditor()).toBeInTheDocument();
@@ -523,4 +534,85 @@ test("graph filtering delegates note lookup to the text-context backend path", a
   const notesPanel = screen.getByLabelText("Notes panel");
   expect(notesPanel).toHaveAttribute("data-active", "true");
   expect(filterNotesByTextContexts).toHaveBeenCalledWith(["how to download the images"]);
+});
+
+test("graph filtering shows a loading state while matching notes are loading", async () => {
+  const pendingLookup = deferred<
+    {
+      id: string;
+      preview: string;
+      lastOpenedAt: string | null;
+      updatedAt: string;
+      textContextLabels?: string[];
+    }[]
+  >();
+
+  vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
+    history: [
+      {
+        id: "recent-note",
+        preview: "Recent note still visible later",
+        lastOpenedAt: null,
+        updatedAt: "2026-04-08T10:00:00Z",
+      },
+    ],
+    placeholders: [],
+    knownTextContexts: [
+      {
+        label: "how to download the images",
+        normalizedLabel: "how to download the images",
+        useCount: 1,
+      },
+    ],
+    textContextRelationships: [],
+    editableTextContexts: [],
+  });
+  vi.mocked(filterNotesByTextContexts).mockReturnValueOnce(pendingLookup.promise);
+
+  render(<App />);
+
+  fireEvent.keyDown(window, { key: "ArrowLeft" });
+  fireEvent.click(await screen.findByRole("button", { name: "Filter notes by how to download the images" }));
+
+  expect(await screen.findByText("Loading notes for this graph filter...")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Notes list")).not.toBeInTheDocument();
+
+  await act(async () => {
+    pendingLookup.resolve([]);
+    await pendingLookup.promise;
+  });
+});
+
+test("graph filtering shows an empty state when no notes match", async () => {
+  vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
+    history: [
+      {
+        id: "recent-note",
+        preview: "Recent note still visible later",
+        lastOpenedAt: null,
+        updatedAt: "2026-04-08T10:00:00Z",
+      },
+    ],
+    placeholders: [],
+    knownTextContexts: [
+      {
+        label: "black box image classification challenge",
+        normalizedLabel: "black box image classification challenge",
+        useCount: 1,
+      },
+    ],
+    textContextRelationships: [],
+    editableTextContexts: [],
+  });
+  vi.mocked(filterNotesByTextContexts).mockResolvedValueOnce([]);
+
+  render(<App />);
+
+  fireEvent.keyDown(window, { key: "ArrowLeft" });
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Filter notes by black box image classification challenge" }),
+  );
+
+  expect(await screen.findByText("No notes match this graph filter yet.")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Notes list")).not.toBeInTheDocument();
 });

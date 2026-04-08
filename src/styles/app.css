@@ -680,6 +680,18 @@ textarea {
   text-transform: uppercase;
 }
 
+.history-status {
+  margin: 16px 0 0;
+  padding: 14px 16px;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.32);
+}
+
+.history-status[data-loading="true"] {
+  color: var(--ink);
+}
+
 .history-header {
   display: flex;
   justify-content: space-between;

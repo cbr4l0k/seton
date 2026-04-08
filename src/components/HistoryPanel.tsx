@@ -26,6 +26,7 @@ type HistoryPanelProps = {
   searchResults: SearchResultItem[];
   activeSearchIndex: number;
   filterLabel?: string | null;
+  filterLoading?: boolean;
   items: HistoryItem[];
   active: boolean;
   selectedNoteIds: string[];
@@ -36,6 +37,7 @@ type HistoryPanelProps = {
   onSearchQueryChange: (value: string) => void;
   onSearchActiveIndexChange: (index: number) => void;
   onSelectionChange: (noteId: string, checked: boolean) => void;
+  statusMessage?: string | null;
 };
 
 export function HistoryPanel({
@@ -43,6 +45,7 @@ export function HistoryPanel({
   searchResults,
   activeSearchIndex,
   filterLabel,
+  filterLoading = false,
   items,
   active,
   selectedNoteIds,
@@ -53,6 +56,7 @@ export function HistoryPanel({
   onSearchQueryChange,
   onSearchActiveIndexChange,
   onSelectionChange,
+  statusMessage,
 }: HistoryPanelProps) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const selected = new Set(selectedNoteIds);
@@ -211,6 +215,14 @@ export function HistoryPanel({
             ))}
           </ul>
         </div>
+      ) : statusMessage ? (
+        <p
+          aria-live={filterLoading ? "polite" : undefined}
+          className="history-status"
+          data-loading={filterLoading}
+        >
+          {statusMessage}
+        </p>
       ) : null}
     </section>
   );
