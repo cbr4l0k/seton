@@ -5,9 +5,14 @@ type ConceptGraphSelection = {
   textContextLabels: string[];
 };
 
+type ConceptGraphFilter =
+  | { kind: "text_context"; label: string }
+  | { kind: "relationship"; left: string; right: string };
+
 type ConceptGraphPanelProps = {
   active: boolean;
   knownTextContexts: KnownTextContext[];
+  onFilterSelect: (filter: ConceptGraphFilter) => void;
   textContextRelationships: TextContextRelationship[];
   selection: ConceptGraphSelection;
 };
@@ -15,6 +20,7 @@ type ConceptGraphPanelProps = {
 export function ConceptGraphPanel({
   active,
   knownTextContexts,
+  onFilterSelect,
   textContextRelationships,
   selection,
 }: ConceptGraphPanelProps) {
@@ -46,7 +52,16 @@ export function ConceptGraphPanel({
                       className="concept-node"
                       data-related={related}
                     >
-                      <span data-related={related} data-testid="concept-node-label">{context.label}</span>
+                      <button
+                        aria-label={`Filter notes by ${context.label}`}
+                        className="concept-graph-panel__action"
+                        data-related={related}
+                        data-testid="concept-node-label"
+                        type="button"
+                        onClick={() => onFilterSelect({ kind: "text_context", label: context.label })}
+                      >
+                        {context.label}
+                      </button>
                       <span className="concept-node__count">{context.useCount}</span>
                     </div>
                   );
@@ -70,9 +85,22 @@ export function ConceptGraphPanel({
                       className="concept-edge"
                       data-related={related}
                     >
-                      <span data-related={related} data-testid="concept-edge-label">
+                      <button
+                        aria-label={`Filter notes by ${relationship.left} and ${relationship.right}`}
+                        className="concept-graph-panel__action"
+                        data-related={related}
+                        data-testid="concept-edge-label"
+                        type="button"
+                        onClick={() =>
+                          onFilterSelect({
+                            kind: "relationship",
+                            left: relationship.left,
+                            right: relationship.right,
+                          })
+                        }
+                      >
                         {relationship.left} {"<>"} {relationship.right}
-                      </span>
+                      </button>
                       <span className="concept-edge__count">{relationship.useCount}</span>
                     </div>
                   );

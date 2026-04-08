@@ -577,6 +577,21 @@ textarea {
   color: var(--muted);
 }
 
+.concept-graph-panel__action {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.concept-graph-panel__action:hover,
+.concept-graph-panel__action:focus-visible {
+  color: var(--accent);
+  outline: none;
+}
+
 .concept-node[data-related="true"],
 .concept-edge[data-related="true"] {
   border-color: rgba(35, 139, 99, 0.5);
@@ -609,6 +624,24 @@ textarea {
 .history-scroll-region:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: 4px;
+}
+
+.history-filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  color: var(--muted);
+}
+
+.history-filter__clear {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  padding: 6px 10px;
+  cursor: pointer;
+  text-transform: uppercase;
 }
 
 .history-header {

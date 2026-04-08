@@ -25,9 +25,11 @@ type HistoryPanelProps = {
   searchQuery: string;
   searchResults: SearchResultItem[];
   activeSearchIndex: number;
+  filterLabel?: string | null;
   items: HistoryItem[];
   active: boolean;
   selectedNoteIds: string[];
+  onClearFilter?: () => void;
   onDelete: (noteId: string) => void;
   onExport: () => void;
   onOpen: (noteId: string) => void;
@@ -40,9 +42,11 @@ export function HistoryPanel({
   searchQuery,
   searchResults,
   activeSearchIndex,
+  filterLabel,
   items,
   active,
   selectedNoteIds,
+  onClearFilter,
   onDelete,
   onExport,
   onOpen,
@@ -138,6 +142,20 @@ export function HistoryPanel({
           Export selected
         </button>
       </div>
+      {filterLabel ? (
+        <div className="history-filter">
+          <span>{filterLabel}</span>
+          <button
+            aria-label="Clear graph filter"
+            className="history-filter__clear"
+            disabled={!active}
+            type="button"
+            onClick={onClearFilter}
+          >
+            clear
+          </button>
+        </div>
+      ) : null}
       {visibleItems.length > 0 ? (
         <div aria-label="Notes list" className="history-scroll-region" tabIndex={active ? 0 : -1}>
           <ul className="history-list">

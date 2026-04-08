@@ -368,3 +368,72 @@ test("graph panel keeps details scrollable without reordering graph items", asyn
     "distributed systems <> number theory",
   ]);
 });
+
+test("clicking graph nodes and edges filters the notes panel", async () => {
+  vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
+    history: [
+      {
+        id: "note-1",
+        preview: "Cryptography note",
+        lastOpenedAt: null,
+        updatedAt: "2026-04-08T10:00:00Z",
+        textContextLabels: ["cryptography", "number theory"],
+      },
+      {
+        id: "note-2",
+        preview: "Systems note",
+        lastOpenedAt: null,
+        updatedAt: "2026-04-08T11:00:00Z",
+        textContextLabels: ["distributed systems", "number theory"],
+      },
+      {
+        id: "note-3",
+        preview: "Elliptic note",
+        lastOpenedAt: null,
+        updatedAt: "2026-04-08T12:00:00Z",
+        textContextLabels: ["cryptography", "elliptic curves"],
+      },
+    ],
+    placeholders: [],
+    knownTextContexts: [
+      { label: "cryptography", normalizedLabel: "cryptography", useCount: 2 },
+      { label: "number theory", normalizedLabel: "number theory", useCount: 2 },
+      { label: "distributed systems", normalizedLabel: "distributed systems", useCount: 1 },
+      { label: "elliptic curves", normalizedLabel: "elliptic curves", useCount: 1 },
+    ],
+    textContextRelationships: [
+      { left: "cryptography", right: "number theory", useCount: 1 },
+      { left: "cryptography", right: "elliptic curves", useCount: 1 },
+      { left: "distributed systems", right: "number theory", useCount: 1 },
+    ],
+    editableTextContexts: [],
+  });
+
+  render(<App />);
+
+  fireEvent.keyDown(window, { key: "ArrowLeft" });
+
+  fireEvent.click(await screen.findByRole("button", { name: "Filter notes by cryptography" }));
+
+  const notesPanel = screen.getByLabelText("Notes panel");
+  expect(notesPanel).toHaveAttribute("data-active", "true");
+  expect(within(notesPanel).getByText("Filtered by cryptography")).toBeInTheDocument();
+  expect(within(notesPanel).getByText("Cryptography note")).toBeInTheDocument();
+  expect(within(notesPanel).getByText("Elliptic note")).toBeInTheDocument();
+  expect(within(notesPanel).queryByText("Systems note")).not.toBeInTheDocument();
+
+  fireEvent.keyDown(window, { key: "ArrowLeft" });
+  fireEvent.click(await screen.findByRole("button", { name: "Filter notes by cryptography and number theory" }));
+
+  expect(within(notesPanel).getByText("Filtered by cryptography + number theory")).toBeInTheDocument();
+  expect(within(notesPanel).getByText("Cryptography note")).toBeInTheDocument();
+  expect(within(notesPanel).queryByText("Elliptic note")).not.toBeInTheDocument();
+  expect(within(notesPanel).queryByText("Systems note")).not.toBeInTheDocument();
+
+  fireEvent.click(within(notesPanel).getByRole("button", { name: "Clear graph filter" }));
+
+  expect(within(notesPanel).queryByText("Filtered by cryptography + number theory")).not.toBeInTheDocument();
+  expect(within(notesPanel).getByText("Cryptography note")).toBeInTheDocument();
+  expect(within(notesPanel).getByText("Elliptic note")).toBeInTheDocument();
+  expect(within(notesPanel).getByText("Systems note")).toBeInTheDocument();
+});

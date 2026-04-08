@@ -40,7 +40,12 @@ type LoadedDraftSnapshot = {
 type CrossViewSelection = {
   noteIds: string[];
   textContextLabels: string[];
+  graphFilter: GraphFilter | null;
 };
+
+type GraphFilter =
+  | { kind: "text_context"; label: string }
+  | { kind: "relationship"; left: string; right: string };
 
 export default function App() {
   const editorRef = useRef<MarkdownEditorHandle | null>(null);
@@ -59,6 +64,7 @@ export default function App() {
   const [crossViewSelection, setCrossViewSelection] = useState<CrossViewSelection>({
     noteIds: [],
     textContextLabels: [],
+    graphFilter: null,
   });
   const [currentNoteId, setCurrentNoteId] = useState<string | null>(null);
   const [requestAnalysisAfterSave, setRequestAnalysisAfterSave] = useState(false);
@@ -271,6 +277,7 @@ export default function App() {
         current.noteIds.filter((id) => id !== noteId),
         historyItems,
         searchResults,
+        current.graphFilter,
       ),
     );
 
@@ -439,6 +446,25 @@ export default function App() {
     });
   }
 
+  function handleGraphFilterSelect(graphFilter: GraphFilter) {
+    setCrossViewSelection((current) =>
+      buildCrossViewSelection(current.noteIds, historyItems, searchResults, graphFilter),
+    );
+    setActiveSearchIndex(0);
+    setPosition("bottom");
+  }
+
+  function handleClearGraphFilter() {
+    setCrossViewSelection((current) =>
+      buildCrossViewSelection(current.noteIds, historyItems, searchResults, null),
+    );
+  }
+
+  const filteredHistoryItems = historyItems.filter((item) => matchesGraphFilter(item, crossViewSelection.graphFilter));
+  const filteredSearchResults = searchResults.filter((item) =>
+    matchesGraphFilter(item, crossViewSelection.graphFilter),
+  );
+
   return (
     <WorkspaceCanvas position={position}>
       <button
@@ -563,6 +589,7 @@ export default function App() {
       <ConceptGraphPanel
         active={position === "left"}
         knownTextContexts={knownTextContexts}
+        onFilterSelect={handleGraphFilterSelect}
         selection={crossViewSelection}
         textContextRelationships={textContextRelationships}
       />
@@ -587,7 +614,9 @@ export default function App() {
       <HistoryPanel
         active={position === "bottom"}
         activeSearchIndex={activeSearchIndex}
-        items={historyItems}
+        filterLabel={formatGraphFilterLabel(crossViewSelection.graphFilter)}
+        items={filteredHistoryItems}
+        onClearFilter={handleClearGraphFilter}
         onDelete={(noteId) => void handleDeleteNote(noteId)}
         onExport={() => void handleExportSelectedNotes()}
         onOpen={(noteId) => void handleOpenNote(noteId)}
@@ -595,7 +624,7 @@ export default function App() {
         onSearchQueryChange={setSearchQuery}
         onSelectionChange={handleHistorySelectionChange}
         searchQuery={searchQuery}
-        searchResults={searchResults}
+        searchResults={filteredSearchResults}
         selectedNoteIds={crossViewSelection.noteIds}
       />
 
@@ -694,6 +723,7 @@ function buildCrossViewSelection(
   noteIds: string[],
   historyItems: RecentNote[],
   searchResults: NoteSearchResult[],
+  graphFilter: GraphFilter | null = null,
 ): CrossViewSelection {
   const noteTextContextLabels = new Map<string, string[]>();
 
@@ -717,6 +747,7 @@ function buildCrossViewSelection(
   }
 
   return {
+    graphFilter,
     noteIds,
     textContextLabels: [...textContextLabels],
   };
@@ -724,4 +755,36 @@ function buildCrossViewSelection(
 
 function normalizeTextContextLabel(value: string) {
   return value.trim().toLowerCase();
+}
+
+function matchesGraphFilter(
+  item: Pick<RecentNote, "textContextLabels"> | Pick<NoteSearchResult, "textContextLabels">,
+  graphFilter: GraphFilter | null,
+) {
+  if (!graphFilter) {
+    return true;
+  }
+
+  const labels = new Set((item.textContextLabels ?? []).map(normalizeTextContextLabel));
+
+  if (graphFilter.kind === "text_context") {
+    return labels.has(normalizeTextContextLabel(graphFilter.label));
+  }
+
+  return (
+    labels.has(normalizeTextContextLabel(graphFilter.left)) &&
+    labels.has(normalizeTextContextLabel(graphFilter.right))
+  );
+}
+
+function formatGraphFilterLabel(graphFilter: GraphFilter | null) {
+  if (!graphFilter) {
+    return null;
+  }
+
+  if (graphFilter.kind === "text_context") {
+    return `Filtered by ${graphFilter.label}`;
+  }
+
+  return `Filtered by ${graphFilter.left} + ${graphFilter.right}`;
 }
