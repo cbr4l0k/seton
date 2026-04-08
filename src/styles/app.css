@@ -527,12 +527,26 @@ textarea {
   display: grid;
   gap: 14px;
   padding: 18px 18px 20px;
+  max-height: min(540px, calc(100vh - 96px));
+  overflow: hidden;
 }
 
 .concept-graph-panel__header,
 .concept-graph-panel__columns {
   display: grid;
   gap: 12px;
+}
+
+.concept-graph-panel__body {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+
+.concept-graph-panel__body:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 4px;
 }
 
 .concept-graph-panel__status,

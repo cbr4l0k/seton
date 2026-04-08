@@ -20,6 +20,18 @@ export function ConceptGraphPanel({
 }: ConceptGraphPanelProps) {
   const relatedLabels = new Set(selection.textContextLabels.map(normalizeTextContextLabel));
   const selectedContextCount = selection.textContextLabels.length;
+  const orderedTextContexts = [...knownTextContexts].sort((left, right) =>
+    compareRelatedFirst(
+      relatedLabels.has(normalizeTextContextLabel(left.label)),
+      relatedLabels.has(normalizeTextContextLabel(right.label)),
+    ),
+  );
+  const orderedRelationships = [...textContextRelationships].sort((left, right) =>
+    compareRelatedFirst(
+      isRelatedRelationship(left.left, left.right, relatedLabels),
+      isRelatedRelationship(right.left, right.right, relatedLabels),
+    ),
+  );
 
   return (
     <section aria-label="Concept Graph panel" className="panel panel-left concept-graph-panel" data-active={active}>
@@ -31,12 +43,13 @@ export function ConceptGraphPanel({
       </div>
 
       {active ? (
-        <div className="concept-graph-panel__columns">
+        <div aria-label="Concept graph details" className="concept-graph-panel__body" tabIndex={0}>
+          <div className="concept-graph-panel__columns">
           <section aria-label="Concept graph nodes" className="concept-graph-panel__section">
             <p className="panel-subtle-title">Nodes</p>
             <div className="concept-graph-panel__list">
-              {knownTextContexts.length > 0 ? (
-                knownTextContexts.map((context) => {
+              {orderedTextContexts.length > 0 ? (
+                orderedTextContexts.map((context) => {
                   const related = relatedLabels.has(normalizeTextContextLabel(context.label));
 
                   return (
@@ -45,7 +58,7 @@ export function ConceptGraphPanel({
                       className="concept-node"
                       data-related={related}
                     >
-                      <span data-related={related}>{context.label}</span>
+                      <span data-related={related} data-testid="concept-node-label">{context.label}</span>
                       <span className="concept-node__count">{context.useCount}</span>
                     </div>
                   );
@@ -59,11 +72,9 @@ export function ConceptGraphPanel({
           <section aria-label="Concept graph edges" className="concept-graph-panel__section">
             <p className="panel-subtle-title">Edges</p>
             <div className="concept-graph-panel__list">
-              {textContextRelationships.length > 0 ? (
-                textContextRelationships.map((relationship) => {
-                  const related =
-                    relatedLabels.has(normalizeTextContextLabel(relationship.left)) &&
-                    relatedLabels.has(normalizeTextContextLabel(relationship.right));
+              {orderedRelationships.length > 0 ? (
+                orderedRelationships.map((relationship) => {
+                  const related = isRelatedRelationship(relationship.left, relationship.right, relatedLabels);
 
                   return (
                     <div
@@ -71,7 +82,9 @@ export function ConceptGraphPanel({
                       className="concept-edge"
                       data-related={related}
                     >
-                      <span data-related={related}>{relationship.left} {"<>"} {relationship.right}</span>
+                      <span data-related={related} data-testid="concept-edge-label">
+                        {relationship.left} {"<>"} {relationship.right}
+                      </span>
                       <span className="concept-edge__count">{relationship.useCount}</span>
                     </div>
                   );
@@ -81,6 +94,7 @@ export function ConceptGraphPanel({
               )}
             </div>
           </section>
+          </div>
         </div>
       ) : null}
     </section>
@@ -89,4 +103,19 @@ export function ConceptGraphPanel({
 
 function normalizeTextContextLabel(value: string) {
   return value.trim().toLowerCase();
+}
+
+function isRelatedRelationship(left: string, right: string, relatedLabels: Set<string>) {
+  return (
+    relatedLabels.has(normalizeTextContextLabel(left)) &&
+    relatedLabels.has(normalizeTextContextLabel(right))
+  );
+}
+
+function compareRelatedFirst(leftRelated: boolean, rightRelated: boolean) {
+  if (leftRelated === rightRelated) {
+    return 0;
+  }
+
+  return leftRelated ? -1 : 1;
 }

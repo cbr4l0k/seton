@@ -316,3 +316,46 @@ test("selecting notes highlights related graph nodes and edges in the left view"
     "false",
   );
 });
+
+test("graph panel keeps details scrollable and surfaces related items first", async () => {
+  vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
+    history: [
+      {
+        id: "note-1",
+        preview: "Focused note",
+        lastOpenedAt: null,
+        updatedAt: "2026-04-08T10:00:00Z",
+        textContextLabels: ["cryptography", "number theory"],
+      },
+    ],
+    placeholders: [],
+    knownTextContexts: [
+      { label: "elliptic curves", normalizedLabel: "elliptic curves", useCount: 1 },
+      { label: "cryptography", normalizedLabel: "cryptography", useCount: 5 },
+      { label: "distributed systems", normalizedLabel: "distributed systems", useCount: 2 },
+      { label: "number theory", normalizedLabel: "number theory", useCount: 3 },
+    ],
+    textContextRelationships: [
+      { left: "cryptography", right: "number theory", useCount: 4 },
+      { left: "cryptography", right: "elliptic curves", useCount: 1 },
+      { left: "distributed systems", right: "number theory", useCount: 1 },
+    ],
+    editableTextContexts: [],
+  });
+
+  render(<App />);
+
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+  fireEvent.click(await screen.findByLabelText("Select Focused note"));
+  fireEvent.keyDown(window, { key: "ArrowLeft" });
+
+  const graphPanel = screen.getByLabelText("Concept Graph panel");
+  const scrollRegion = within(graphPanel).getByLabelText("Concept graph details");
+  expect(scrollRegion).toHaveAttribute("tabindex", "0");
+
+  const nodeLabels = within(graphPanel).getAllByTestId("concept-node-label").map((node) => node.textContent);
+  expect(nodeLabels.slice(0, 2)).toEqual(["cryptography", "number theory"]);
+
+  const edgeLabels = within(graphPanel).getAllByTestId("concept-edge-label").map((edge) => edge.textContent);
+  expect(edgeLabels[0]).toBe("cryptography <> number theory");
+});
