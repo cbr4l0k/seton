@@ -317,7 +317,7 @@ test("selecting notes highlights related graph nodes and edges in the left view"
   );
 });
 
-test("graph panel keeps details scrollable and surfaces related items first", async () => {
+test("graph panel keeps details scrollable without reordering graph items", async () => {
   vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
     history: [
       {
@@ -354,8 +354,17 @@ test("graph panel keeps details scrollable and surfaces related items first", as
   expect(scrollRegion).toHaveAttribute("tabindex", "0");
 
   const nodeLabels = within(graphPanel).getAllByTestId("concept-node-label").map((node) => node.textContent);
-  expect(nodeLabels.slice(0, 2)).toEqual(["cryptography", "number theory"]);
+  expect(nodeLabels).toEqual([
+    "elliptic curves",
+    "cryptography",
+    "distributed systems",
+    "number theory",
+  ]);
 
   const edgeLabels = within(graphPanel).getAllByTestId("concept-edge-label").map((edge) => edge.textContent);
-  expect(edgeLabels[0]).toBe("cryptography <> number theory");
+  expect(edgeLabels).toEqual([
+    "cryptography <> number theory",
+    "cryptography <> elliptic curves",
+    "distributed systems <> number theory",
+  ]);
 });
