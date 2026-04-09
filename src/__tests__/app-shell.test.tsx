@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import App from "../App";
 import departureMonoFontUrl from "../assets/fonts/DepartureMono-Regular.woff2?url";
@@ -9,7 +9,14 @@ type MarkdownEditorTestApi = {
 };
 
 const cytoscapeMock = vi.hoisted(() => {
-  type Handler = (event: { target: { data: (key?: string) => unknown } }) => void;
+  type Handler = (event: {
+    target: {
+      addClass?: (name: string) => void;
+      data: (key?: string) => unknown;
+      removeClass?: (name: string) => void;
+      renderedPosition?: () => { x: number; y: number };
+    };
+  }) => void;
   const instances: Array<{
     handlers: Map<string, Handler>;
     instance: Record<string, unknown>;
@@ -43,7 +50,7 @@ const cytoscapeMock = vi.hoisted(() => {
   });
 
   return {
-    emitLast(key: string, data: Record<string, unknown>) {
+    emitLast(key: string, data: Record<string, unknown>, renderedPosition?: { x: number; y: number }) {
       const record = instances.at(-1);
       if (!record) {
         throw new Error("No Cytoscape instance available");
@@ -56,8 +63,13 @@ const cytoscapeMock = vi.hoisted(() => {
 
       handler({
         target: {
+          addClass() {},
           data(requestedKey?: string) {
             return requestedKey ? data[requestedKey] : data;
+          },
+          removeClass() {},
+          renderedPosition() {
+            return renderedPosition ?? { x: 0, y: 0 };
           },
         },
       });
@@ -150,6 +162,29 @@ function emitGraphEdgeTap(left: string, right: string) {
       kind: "relationship",
       left,
       right,
+    });
+  });
+}
+
+function emitGraphNodeMouseOver(label: string, renderedPosition = { x: 120, y: 84 }) {
+  act(() => {
+    cytoscapeMock.emitLast(
+      "mouseover:node",
+      {
+        hoverTitle: label,
+        kind: "text_context",
+        label,
+      },
+      renderedPosition,
+    );
+  });
+}
+
+function emitGraphNodeMouseOut(label: string) {
+  act(() => {
+    cytoscapeMock.emitLast("mouseout:node", {
+      kind: "text_context",
+      label,
     });
   });
 }
@@ -424,17 +459,9 @@ test("selecting notes highlights related graph nodes and edges in the left view"
   expect(ellipticEdge?.classes ?? "").not.toContain("is-related");
 });
 
-test("graph panel mounts a Cytoscape canvas with mapped nodes and edges", async () => {
+test("graph panel mounts an interactive Cytoscape canvas with circular unlabeled nodes", async () => {
   vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
-    history: [
-      {
-        id: "note-1",
-        preview: "Focused note",
-        lastOpenedAt: null,
-        updatedAt: "2026-04-08T10:00:00Z",
-        textContextLabels: ["cryptography", "number theory"],
-      },
-    ],
+    history: [],
     placeholders: [],
     knownTextContexts: [
       { label: "elliptic curves", normalizedLabel: "elliptic curves", useCount: 1 },
@@ -452,8 +479,6 @@ test("graph panel mounts a Cytoscape canvas with mapped nodes and edges", async 
 
   render(<App />);
 
-  fireEvent.keyDown(window, { key: "ArrowDown" });
-  fireEvent.click(await screen.findByLabelText("Select Focused note"));
   fireEvent.keyDown(window, { key: "ArrowLeft" });
 
   const graphPanel = screen.getByLabelText("Concept Graph panel");
@@ -461,11 +486,45 @@ test("graph panel mounts a Cytoscape canvas with mapped nodes and edges", async 
   expect(scrollRegion).toHaveAttribute("tabindex", "0");
   expect(within(graphPanel).getByTestId("concept-graph-canvas")).toBeInTheDocument();
 
-  const options = cytoscapeMock.lastOptions() as { elements?: Array<{ data: Record<string, unknown> }> } | null;
-  expect(options?.elements).toBeDefined();
-  expect(options?.elements).toHaveLength(7);
+  await waitFor(() => {
+    const options = cytoscapeMock.lastOptions() as {
+      elements?: Array<{ data: Record<string, unknown> }>;
+      style?: Array<{ selector: string; style: Record<string, string> }>;
+      userPanningEnabled?: boolean;
+      userZoomingEnabled?: boolean;
+    } | null;
+
+    expect(options?.elements).toHaveLength(7);
+  });
+
+  const options = cytoscapeMock.lastOptions() as {
+    elements?: Array<{ data: Record<string, unknown> }>;
+    style?: Array<{ selector: string; style: Record<string, string> }>;
+    userPanningEnabled?: boolean;
+    userZoomingEnabled?: boolean;
+  } | null;
   expect(options?.elements?.filter((element) => element.data.kind === "text_context")).toHaveLength(4);
   expect(options?.elements?.filter((element) => element.data.kind === "relationship")).toHaveLength(3);
+  expect(options?.userZoomingEnabled).toBe(true);
+  expect(options?.userPanningEnabled).toBe(true);
+
+  const cryptographyNode = options?.elements?.find((element) => element.data.label === "cryptography");
+  expect(cryptographyNode?.data.degree).toBe(2);
+  expect(cryptographyNode?.data.hoverTitle).toBe("cryptography");
+
+  const nodeStyle = options?.style?.find((entry) => entry.selector === "node")?.style;
+  expect(nodeStyle?.shape).toBe("ellipse");
+  expect(nodeStyle?.label).toBe("");
+  expect(nodeStyle?.width).toContain("mapData");
+  expect(nodeStyle?.height).toContain("mapData");
+
+  expect(screen.queryByText("cryptography")).not.toBeInTheDocument();
+
+  emitGraphNodeMouseOver("cryptography", { x: 160, y: 112 });
+  expect(await screen.findByText("cryptography")).toBeInTheDocument();
+
+  emitGraphNodeMouseOut("cryptography");
+  expect(screen.queryByText("cryptography")).not.toBeInTheDocument();
 });
 
 test("graph focus stays separate from note selection and filtering", async () => {

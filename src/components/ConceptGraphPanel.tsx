@@ -1,5 +1,5 @@
 import cytoscape, { type ElementDefinition, type StylesheetJson } from "cytoscape";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { KnownTextContext, TextContextRelationship } from "../lib/types";
 
@@ -32,13 +32,21 @@ export function ConceptGraphPanel({
   selection,
 }: ConceptGraphPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const relatedLabels = new Set(selection.textContextLabels.map(normalizeTextContextLabel));
+  const [hoveredNode, setHoveredNode] = useState<{ label: string; x: number; y: number } | null>(null);
+  const relatedLabels = useMemo(
+    () => new Set(selection.textContextLabels.map(normalizeTextContextLabel)),
+    [selection.textContextLabels],
+  );
   const selectedContextCount = selection.textContextLabels.length;
-  const graphElements = buildGraphElements(
-    knownTextContexts,
-    textContextRelationships,
-    relatedLabels,
-    focusedItem,
+  const graphElements = useMemo(
+    () =>
+      buildGraphElements(
+        knownTextContexts,
+        textContextRelationships,
+        relatedLabels,
+        focusedItem,
+      ),
+    [focusedItem, knownTextContexts, relatedLabels, textContextRelationships],
   );
 
   useEffect(() => {
@@ -56,7 +64,11 @@ export function ConceptGraphPanel({
         padding: 18,
       },
       style: graphStylesheet,
-      userZoomingEnabled: false,
+      userPanningEnabled: true,
+      userZoomingEnabled: true,
+      minZoom: 0.65,
+      maxZoom: 2.4,
+      wheelSensitivity: 0.18,
     });
 
     cy.on("tap", "node", (event) => {
@@ -77,15 +89,29 @@ export function ConceptGraphPanel({
 
     cy.on("mouseover", "node", (event) => {
       event.target.addClass?.("is-hovered");
+      const label = event.target.data("hoverTitle");
+      const position = event.target.renderedPosition?.();
+
+      if (typeof label === "string" && position) {
+        setHoveredNode({
+          label,
+          x: position.x,
+          y: position.y,
+        });
+      }
     });
     cy.on("mouseout", "node", (event) => {
       event.target.removeClass?.("is-hovered");
+      setHoveredNode(null);
     });
     cy.on("mouseover", "edge", (event) => {
       event.target.addClass?.("is-hovered");
     });
     cy.on("mouseout", "edge", (event) => {
       event.target.removeClass?.("is-hovered");
+    });
+    cy.on("pan zoom", () => {
+      setHoveredNode(null);
     });
 
     cy.layout({
@@ -132,11 +158,27 @@ export function ConceptGraphPanel({
             </button>
           </div>
           <div
-            ref={containerRef}
-            aria-hidden={graphElements.length === 0}
-            className="concept-graph-panel__canvas"
-            data-testid="concept-graph-canvas"
-          />
+            className="concept-graph-panel__canvas-shell"
+          >
+            <div
+              ref={containerRef}
+              aria-hidden={graphElements.length === 0}
+              className="concept-graph-panel__canvas"
+              data-testid="concept-graph-canvas"
+            />
+            {hoveredNode ? (
+              <div
+                className="concept-graph-panel__tooltip"
+                role="tooltip"
+                style={{
+                  left: `${hoveredNode.x}px`,
+                  top: `${hoveredNode.y}px`,
+                }}
+              >
+                {hoveredNode.label}
+              </div>
+            ) : null}
+          </div>
           {graphElements.length === 0 ? (
             <p className="concept-graph-panel__empty">No graph data yet.</p>
           ) : null}
@@ -152,6 +194,8 @@ function buildGraphElements(
   relatedLabels: Set<string>,
   focusedItem: ConceptGraphFilter | null,
 ): ElementDefinition[] {
+  const degreeByLabel = buildRelationshipDegreeMap(textContextRelationships);
+
   return [
     ...knownTextContexts.map((context) => {
       const normalizedLabel = normalizeTextContextLabel(context.label);
@@ -162,6 +206,8 @@ function buildGraphElements(
       return {
         data: {
           id: `text_context:${context.normalizedLabel}`,
+          degree: degreeByLabel.get(normalizedLabel) ?? 0,
+          hoverTitle: context.label,
           kind: "text_context",
           label: context.label,
           useCount: context.useCount,
@@ -200,6 +246,20 @@ function buildGraphElements(
   ];
 }
 
+function buildRelationshipDegreeMap(textContextRelationships: TextContextRelationship[]) {
+  const degreeByLabel = new Map<string, number>();
+
+  for (const relationship of textContextRelationships) {
+    const left = normalizeTextContextLabel(relationship.left);
+    const right = normalizeTextContextLabel(relationship.right);
+
+    degreeByLabel.set(left, (degreeByLabel.get(left) ?? 0) + 1);
+    degreeByLabel.set(right, (degreeByLabel.get(right) ?? 0) + 1);
+  }
+
+  return degreeByLabel;
+}
+
 function buildGraphClasses({ related, focused }: { related: boolean; focused: boolean }) {
   return [related ? "is-related" : "", focused ? "is-focused" : ""].filter(Boolean).join(" ");
 }
@@ -223,19 +283,10 @@ const graphStylesheet: StylesheetJson = [
       "background-color": "#d6d2c4",
       "border-color": "#7b7468",
       "border-width": "1",
-      color: "#16171a",
-      content: "data(label)",
-      "font-family": "Departure Mono, monospace",
-      "font-size": "10",
-      height: "34",
-      label: "data(label)",
-      padding: "8px",
-      shape: "round-rectangle",
-      "text-halign": "center",
-      "text-max-width": "140",
-      "text-valign": "center",
-      "text-wrap": "wrap",
-      width: "120",
+      height: "mapData(degree, 0, 6, 22, 76)",
+      label: "",
+      shape: "ellipse",
+      width: "mapData(degree, 0, 6, 22, 76)",
     },
   },
   {
@@ -269,6 +320,11 @@ const graphStylesheet: StylesheetJson = [
       color: "#16171a",
       "line-color": "#16171a",
       "target-arrow-color": "#16171a",
+    },
+  },
+  {
+    selector: "edge.is-focused",
+    style: {
       width: "3",
     },
   },

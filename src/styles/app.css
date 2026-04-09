@@ -482,7 +482,7 @@ textarea {
 .panel-left {
   left: 24px;
   top: 50%;
-  width: min(360px, calc(100vw - 48px));
+  width: min(500px, calc(100vw - 48px));
   height: min(540px, calc(100vh - 96px));
   transform: translate(-120%, -50%);
 }
@@ -572,6 +572,27 @@ textarea {
   background:
     radial-gradient(circle at top left, rgba(255, 255, 255, 0.48), transparent 38%),
     rgba(255, 255, 255, 0.22);
+}
+
+.concept-graph-panel__canvas-shell {
+  position: relative;
+  min-height: 0;
+  height: 100%;
+}
+
+.concept-graph-panel__tooltip {
+  position: absolute;
+  transform: translate(12px, calc(-100% - 8px));
+  border: 1px solid var(--line-strong);
+  background: rgba(243, 240, 232, 0.96);
+  color: var(--ink);
+  padding: 6px 8px;
+  max-width: 220px;
+  pointer-events: none;
+  white-space: normal;
+  line-height: 1.35;
+  box-shadow: none;
+  z-index: 1;
 }
 
 .concept-graph-panel__section {
