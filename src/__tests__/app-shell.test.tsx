@@ -562,12 +562,16 @@ test("graph panel mounts an interactive Cytoscape canvas with circular unlabeled
     elements?: Array<{ data: Record<string, unknown> }>;
     layout?: Record<string, unknown>;
     minZoom?: number;
+    panningEnabled?: boolean;
     style?: Array<{ selector: string; style: Record<string, string> }>;
+    zoomingEnabled?: boolean;
     userPanningEnabled?: boolean;
     userZoomingEnabled?: boolean;
     wheelSensitivity?: number;
   } | null;
   expect(options?.elements).toEqual([]);
+  expect(options?.panningEnabled).toBe(true);
+  expect(options?.zoomingEnabled).toBe(true);
   expect(options?.userZoomingEnabled).toBe(true);
   expect(options?.userPanningEnabled).toBe(true);
   expect(options?.minZoom).toBe(0.08);

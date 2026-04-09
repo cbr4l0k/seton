@@ -264,6 +264,7 @@ textarea {
 }
 
 .panel {
+  box-sizing: border-box;
   border: 1px solid var(--line);
   border-radius: 0;
   background: rgba(243, 240, 232, 0.62);
@@ -579,12 +580,17 @@ textarea {
   background:
     radial-gradient(circle at top left, rgba(255, 255, 255, 0.48), transparent 38%),
     rgba(255, 255, 255, 0.22);
+  overscroll-behavior: contain;
+  touch-action: none;
 }
 
 .concept-graph-panel__canvas-shell {
   position: relative;
   min-height: 0;
   height: 100%;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  touch-action: none;
 }
 
 .concept-graph-panel__tooltip {

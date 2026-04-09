@@ -73,7 +73,9 @@ export function ConceptGraphPanel({
     const cy = cytoscape({
       container: containerRef.current,
       elements: [],
+      panningEnabled: true,
       style: graphStylesheet,
+      zoomingEnabled: true,
       userPanningEnabled: true,
       userZoomingEnabled: true,
       minZoom: 0.08,
