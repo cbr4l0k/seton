@@ -137,6 +137,9 @@ const cytoscapeMock = vi.hoisted(() => {
         data: element.data,
       })) ?? [];
     },
+    lastInstance() {
+      return instances.at(-1)?.instance ?? null;
+    },
     instanceCount() {
       return instances.length;
     },
@@ -552,14 +555,7 @@ test("graph panel mounts an interactive Cytoscape canvas with circular unlabeled
   expect(within(graphPanel).getByTestId("concept-graph-canvas")).toBeInTheDocument();
 
   await waitFor(() => {
-    const options = cytoscapeMock.lastOptions() as {
-      elements?: Array<{ data: Record<string, unknown> }>;
-      style?: Array<{ selector: string; style: Record<string, string> }>;
-      userPanningEnabled?: boolean;
-      userZoomingEnabled?: boolean;
-    } | null;
-
-    expect(options?.elements).toHaveLength(7);
+    expect(cytoscapeMock.lastElements()).toHaveLength(7);
   });
 
   const options = cytoscapeMock.lastOptions() as {
@@ -571,22 +567,23 @@ test("graph panel mounts an interactive Cytoscape canvas with circular unlabeled
     userZoomingEnabled?: boolean;
     wheelSensitivity?: number;
   } | null;
-  expect(options?.elements?.filter((element) => element.data.kind === "text_context")).toHaveLength(4);
-  expect(options?.elements?.filter((element) => element.data.kind === "relationship")).toHaveLength(3);
+  expect(options?.elements).toEqual([]);
   expect(options?.userZoomingEnabled).toBe(true);
   expect(options?.userPanningEnabled).toBe(true);
   expect(options?.minZoom).toBe(0.08);
   expect(options?.wheelSensitivity).toBe(0.24);
-  expect(options?.layout).toMatchObject({
+  expect(cytoscapeMock.lastInstance()).not.toBeNull();
+  expect((cytoscapeMock.lastInstance() as { layout: ReturnType<typeof vi.fn> }).layout).toHaveBeenCalledWith(expect.objectContaining({
     idealEdgeLength: 180,
     name: "cose",
     nodeOverlap: 64,
     padding: 32,
-  });
+  }));
 
-  const cryptographyNode = options?.elements?.find((element) => element.data.label === "cryptography");
-  expect(cryptographyNode?.data.degree).toBe(2);
-  expect(cryptographyNode?.data.hoverTitle).toBe("cryptography");
+  const currentElements = cytoscapeMock.lastElements();
+  const currentCryptographyNode = currentElements.find((element) => element.data.label === "cryptography");
+  expect(currentCryptographyNode?.data.degree).toBe(2);
+  expect(currentCryptographyNode?.data.hoverTitle).toBe("cryptography");
 
   const nodeStyle = options?.style?.find((entry) => entry.selector === "node")?.style;
   const edgeStyle = options?.style?.find((entry) => entry.selector === "edge")?.style;

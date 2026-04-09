@@ -72,8 +72,7 @@ export function ConceptGraphPanel({
 
     const cy = cytoscape({
       container: containerRef.current,
-      elements: graphElements,
-      layout: graphLayoutConfig,
+      elements: [],
       style: graphStylesheet,
       userPanningEnabled: true,
       userZoomingEnabled: true,
@@ -131,7 +130,7 @@ export function ConceptGraphPanel({
       setHoveredNode(null);
       cy.destroy();
     };
-  }, [active, graphElements]);
+  }, [active]);
 
   useEffect(() => {
     const cy = cyRef.current;
