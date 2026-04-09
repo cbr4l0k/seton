@@ -73,18 +73,13 @@ export function ConceptGraphPanel({
     const cy = cytoscape({
       container: containerRef.current,
       elements: graphElements,
-      layout: {
-        animate: false,
-        fit: true,
-        name: "cose",
-        padding: 18,
-      },
+      layout: graphLayoutConfig,
       style: graphStylesheet,
       userPanningEnabled: true,
       userZoomingEnabled: true,
-      minZoom: 0.18,
+      minZoom: 0.08,
       maxZoom: 2.4,
-      wheelSensitivity: 0.12,
+      wheelSensitivity: 0.24,
     });
     cyRef.current = cy;
 
@@ -131,15 +126,6 @@ export function ConceptGraphPanel({
       setHoveredNode(null);
     });
 
-    cy.layout({
-      animate: false,
-      fit: true,
-      name: "cose",
-      padding: 18,
-    }).run();
-    cy.resize();
-    cy.fit(undefined, 18);
-
     return () => {
       cyRef.current = null;
       setHoveredNode(null);
@@ -155,14 +141,9 @@ export function ConceptGraphPanel({
 
     cy.elements().remove();
     cy.add(graphElements);
-    cy.layout({
-      animate: false,
-      fit: true,
-      name: "cose",
-      padding: 18,
-    }).run();
+    cy.layout(graphLayoutConfig).run();
     cy.resize();
-    cy.fit(undefined, 18);
+    cy.fit(undefined, graphLayoutConfig.padding);
   }, [active, graphElements, graphStructureKey]);
 
   useEffect(() => {
@@ -414,3 +395,16 @@ const graphStylesheet: StylesheetJson = [
     },
   },
 ];
+
+const graphLayoutConfig = {
+  animate: false,
+  componentSpacing: 120,
+  fit: true,
+  gravity: 0.18,
+  idealEdgeLength: 180,
+  name: "cose" as const,
+  nodeOverlap: 64,
+  nodeRepulsion: 180000,
+  numIter: 1600,
+  padding: 32,
+};

@@ -564,24 +564,37 @@ test("graph panel mounts an interactive Cytoscape canvas with circular unlabeled
 
   const options = cytoscapeMock.lastOptions() as {
     elements?: Array<{ data: Record<string, unknown> }>;
+    layout?: Record<string, unknown>;
+    minZoom?: number;
     style?: Array<{ selector: string; style: Record<string, string> }>;
     userPanningEnabled?: boolean;
     userZoomingEnabled?: boolean;
+    wheelSensitivity?: number;
   } | null;
   expect(options?.elements?.filter((element) => element.data.kind === "text_context")).toHaveLength(4);
   expect(options?.elements?.filter((element) => element.data.kind === "relationship")).toHaveLength(3);
   expect(options?.userZoomingEnabled).toBe(true);
   expect(options?.userPanningEnabled).toBe(true);
+  expect(options?.minZoom).toBe(0.08);
+  expect(options?.wheelSensitivity).toBe(0.24);
+  expect(options?.layout).toMatchObject({
+    idealEdgeLength: 180,
+    name: "cose",
+    nodeOverlap: 64,
+    padding: 32,
+  });
 
   const cryptographyNode = options?.elements?.find((element) => element.data.label === "cryptography");
   expect(cryptographyNode?.data.degree).toBe(2);
   expect(cryptographyNode?.data.hoverTitle).toBe("cryptography");
 
   const nodeStyle = options?.style?.find((entry) => entry.selector === "node")?.style;
+  const edgeStyle = options?.style?.find((entry) => entry.selector === "edge")?.style;
   expect(nodeStyle?.shape).toBe("ellipse");
   expect(nodeStyle?.label).toBe("");
   expect(nodeStyle?.width).toContain("mapData");
   expect(nodeStyle?.height).toContain("mapData");
+  expect(edgeStyle?.["target-arrow-shape"]).toBeUndefined();
 
   expect(screen.queryByText("cryptography")).not.toBeInTheDocument();
 
