@@ -29,6 +29,7 @@ const cytoscapeMock = vi.hoisted(() => {
 
   const factory = vi.fn((options: Record<string, unknown>) => {
     const handlers = new Map<string, Handler>();
+    let currentZoom = 1;
     const currentElements = ((options.elements as Array<{ classes?: string; data: Record<string, unknown> }>) ?? []).map(
       (element) => ({
         classes: new Set((element.classes ?? "").split(" ").filter(Boolean)),
@@ -85,6 +86,8 @@ const cytoscapeMock = vi.hoisted(() => {
       elements: vi.fn(() => createCollection()),
       fit: vi.fn(),
       layout: vi.fn(() => ({ run: vi.fn() })),
+      maxZoom: vi.fn(() => (typeof options.maxZoom === "number" ? options.maxZoom : 1)),
+      minZoom: vi.fn(() => (typeof options.minZoom === "number" ? options.minZoom : 0)),
       off: vi.fn(),
       on: vi.fn((eventName: string, selector: string | Handler, handler?: Handler) => {
         if (typeof selector === "string" && handler) {
@@ -98,7 +101,24 @@ const cytoscapeMock = vi.hoisted(() => {
 
         return instance;
       }),
+      pan: vi.fn(() => ({ x: 0, y: 0 })),
       resize: vi.fn(),
+      zoom: vi.fn((value?: number | { level?: number }) => {
+        if (value === undefined) {
+          return currentZoom;
+        }
+
+        if (typeof value === "number") {
+          currentZoom = value;
+          return instance;
+        }
+
+        if (typeof value?.level === "number") {
+          currentZoom = value.level;
+        }
+
+        return instance;
+      }),
     };
 
     instances.push({ elements: currentElements, handlers, instance, options });
@@ -572,10 +592,9 @@ test("graph panel mounts an interactive Cytoscape canvas with circular unlabeled
   expect(options?.elements).toEqual([]);
   expect(options?.panningEnabled).toBe(true);
   expect(options?.zoomingEnabled).toBe(true);
-  expect(options?.userZoomingEnabled).toBe(true);
+  expect(options?.userZoomingEnabled).toBe(false);
   expect(options?.userPanningEnabled).toBe(true);
   expect(options?.minZoom).toBe(0.08);
-  expect(options?.wheelSensitivity).toBe(0.24);
   expect(cytoscapeMock.lastInstance()).not.toBeNull();
   expect((cytoscapeMock.lastInstance() as { layout: ReturnType<typeof vi.fn> }).layout).toHaveBeenCalledWith(expect.objectContaining({
     idealEdgeLength: 180,
@@ -604,6 +623,62 @@ test("graph panel mounts an interactive Cytoscape canvas with circular unlabeled
 
   emitGraphNodeMouseOut("cryptography");
   expect(screen.queryByText("cryptography")).not.toBeInTheDocument();
+});
+
+test("mouse wheel on the graph canvas performs an explicit zoom step", async () => {
+  vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [
+      { label: "cryptography", normalizedLabel: "cryptography", useCount: 2 },
+      { label: "number theory", normalizedLabel: "number theory", useCount: 2 },
+    ],
+    textContextRelationships: [{ left: "cryptography", right: "number theory", useCount: 1 }],
+    editableTextContexts: [],
+  });
+
+  render(<App />);
+
+  fireEvent.keyDown(window, { key: "ArrowLeft" });
+
+  const canvas = await screen.findByTestId("concept-graph-canvas");
+  const canvasShell = canvas.parentElement;
+  Object.defineProperty(canvasShell, "getBoundingClientRect", {
+    configurable: true,
+    value: () => ({
+      bottom: 260,
+      height: 240,
+      left: 20,
+      right: 260,
+      top: 20,
+      width: 240,
+      x: 20,
+      y: 20,
+      toJSON() {
+        return this;
+      },
+    }),
+  });
+
+  await waitFor(() => {
+    expect(cytoscapeMock.lastElements()).toHaveLength(3);
+  });
+
+  const instance = cytoscapeMock.lastInstance() as { zoom: ReturnType<typeof vi.fn> } | null;
+  expect(instance).not.toBeNull();
+
+  fireEvent.wheel(canvas, {
+    clientX: 140,
+    clientY: 140,
+    deltaY: -120,
+  });
+
+  expect(instance?.zoom).toHaveBeenCalledWith(
+    expect.objectContaining({
+      level: expect.any(Number),
+      renderedPosition: { x: 120, y: 120 },
+    }),
+  );
 });
 
 test("graph focus stays separate from note selection and filtering", async () => {

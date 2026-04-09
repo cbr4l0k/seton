@@ -37,6 +37,7 @@ export function ConceptGraphPanel({
   selection,
 }: ConceptGraphPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const canvasShellRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<cytoscape.Core | null>(null);
   const onFocusSelectRef = useRef(onFocusSelect);
   const [hoveredNode, setHoveredNode] = useState<{ label: string; x: number; y: number } | null>(null);
@@ -77,10 +78,9 @@ export function ConceptGraphPanel({
       style: graphStylesheet,
       zoomingEnabled: true,
       userPanningEnabled: true,
-      userZoomingEnabled: true,
+      userZoomingEnabled: false,
       minZoom: 0.08,
       maxZoom: 2.4,
-      wheelSensitivity: 0.24,
     });
     cyRef.current = cy;
 
@@ -127,7 +127,40 @@ export function ConceptGraphPanel({
       setHoveredNode(null);
     });
 
+    const canvasShell = canvasShellRef.current;
+    function handleWheel(event: WheelEvent) {
+      const nextCy = cyRef.current;
+      if (!nextCy) {
+        return;
+      }
+
+      event.preventDefault();
+
+      const currentZoom = nextCy.zoom();
+      const rect = canvasShell?.getBoundingClientRect();
+      const maxZoom = nextCy.maxZoom();
+      const minZoom = nextCy.minZoom();
+      const renderedPosition = rect
+        ? {
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top,
+          }
+        : { x: 0, y: 0 };
+      const intensity = Math.min(Math.abs(event.deltaY), 240);
+      const direction = event.deltaY < 0 ? 1 : -1;
+      const factor = Math.exp((direction * intensity) / 180);
+      const nextZoom = clamp(currentZoom * factor, minZoom, maxZoom);
+
+      nextCy.zoom({
+        level: nextZoom,
+        renderedPosition,
+      });
+    }
+
+    canvasShell?.addEventListener("wheel", handleWheel, { passive: false });
+
     return () => {
+      canvasShell?.removeEventListener("wheel", handleWheel);
       cyRef.current = null;
       setHoveredNode(null);
       cy.destroy();
@@ -219,9 +252,7 @@ export function ConceptGraphPanel({
               filter focused item
             </button>
           </div>
-          <div
-            className="concept-graph-panel__canvas-shell"
-          >
+          <div ref={canvasShellRef} className="concept-graph-panel__canvas-shell">
             <div
               ref={containerRef}
               aria-hidden={graphElements.length === 0}
@@ -327,6 +358,10 @@ function buildGraphClasses({ related, focused }: { related: boolean; focused: bo
 
 function normalizeTextContextLabel(value: string) {
   return value.trim().toLowerCase();
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function formatFocusLabel(target: ConceptGraphFilter) {
