@@ -19,14 +19,70 @@ const cytoscapeMock = vi.hoisted(() => {
   }) => void;
   const instances: Array<{
     handlers: Map<string, Handler>;
+    elements: Array<{
+      classes: Set<string>;
+      data: Record<string, unknown>;
+    }>;
     instance: Record<string, unknown>;
     options: Record<string, unknown>;
   }> = [];
 
   const factory = vi.fn((options: Record<string, unknown>) => {
     const handlers = new Map<string, Handler>();
+    const currentElements = ((options.elements as Array<{ classes?: string; data: Record<string, unknown> }>) ?? []).map(
+      (element) => ({
+        classes: new Set((element.classes ?? "").split(" ").filter(Boolean)),
+        data: element.data,
+      }),
+    );
+    function createCollection() {
+      const elementApis = currentElements.map((element) => ({
+        addClass(name: string) {
+          for (const className of name.split(" ")) {
+            if (className) {
+              element.classes.add(className);
+            }
+          }
+        },
+        data(requestedKey?: string) {
+          return requestedKey ? element.data[requestedKey] : element.data;
+        },
+        removeClass(name: string) {
+          for (const className of name.split(" ")) {
+            if (className) {
+              element.classes.delete(className);
+            }
+          }
+        },
+      }));
+
+      return {
+        [Symbol.iterator]: function* iterator() {
+          yield* elementApis;
+        },
+        remove() {
+          currentElements.length = 0;
+          return this;
+        },
+        removeClass(name: string) {
+          for (const elementApi of elementApis) {
+            elementApi.removeClass(name);
+          }
+          return this;
+        },
+      };
+    }
     const instance = {
+      add: vi.fn((elements: Array<{ classes?: string; data: Record<string, unknown> }>) => {
+        currentElements.push(
+          ...elements.map((element) => ({
+            classes: new Set((element.classes ?? "").split(" ").filter(Boolean)),
+            data: element.data,
+          })),
+        );
+      }),
       destroy: vi.fn(),
+      elements: vi.fn(() => createCollection()),
       fit: vi.fn(),
       layout: vi.fn(() => ({ run: vi.fn() })),
       off: vi.fn(),
@@ -45,7 +101,7 @@ const cytoscapeMock = vi.hoisted(() => {
       resize: vi.fn(),
     };
 
-    instances.push({ handlers, instance, options });
+    instances.push({ elements: currentElements, handlers, instance, options });
     return instance;
   });
 
@@ -75,6 +131,15 @@ const cytoscapeMock = vi.hoisted(() => {
       });
     },
     factory,
+    lastElements() {
+      return instances.at(-1)?.elements.map((element) => ({
+        classes: Array.from(element.classes).sort().join(" "),
+        data: element.data,
+      })) ?? [];
+    },
+    instanceCount() {
+      return instances.length;
+    },
     lastOptions() {
       return instances.at(-1)?.options ?? null;
     },
@@ -441,14 +506,14 @@ test("selecting notes highlights related graph nodes and edges in the left view"
   fireEvent.keyDown(window, { key: "ArrowLeft" });
 
   expect(within(graphPanel).getByText("2 note-linked contexts")).toBeInTheDocument();
-  const options = cytoscapeMock.lastOptions() as { elements?: Array<{ classes?: string; data: Record<string, unknown> }> } | null;
-  const cryptographyNode = options?.elements?.find((element) => element.data.label === "cryptography");
-  const numberTheoryNode = options?.elements?.find((element) => element.data.label === "number theory");
-  const ellipticNode = options?.elements?.find((element) => element.data.label === "elliptic curves");
-  const cryptographyEdge = options?.elements?.find(
+  const elements = cytoscapeMock.lastElements();
+  const cryptographyNode = elements.find((element) => element.data.label === "cryptography");
+  const numberTheoryNode = elements.find((element) => element.data.label === "number theory");
+  const ellipticNode = elements.find((element) => element.data.label === "elliptic curves");
+  const cryptographyEdge = elements.find(
     (element) => element.data.left === "cryptography" && element.data.right === "number theory",
   );
-  const ellipticEdge = options?.elements?.find(
+  const ellipticEdge = elements.find(
     (element) => element.data.left === "cryptography" && element.data.right === "elliptic curves",
   );
 
@@ -645,6 +710,39 @@ test("graph focus stays separate from note selection and filtering", async () =>
   expect(within(notesPanel).getByLabelText("Select Cryptography note")).not.toBeChecked();
   expect(within(notesPanel).getByLabelText("Select Elliptic note")).not.toBeChecked();
   expect(within(notesPanel).getByLabelText("Select Systems note")).toBeChecked();
+});
+
+test("graph taps do not recreate the Cytoscape instance and reset the camera", async () => {
+  vi.mocked(bootstrapWorkspace).mockResolvedValueOnce({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [
+      { label: "cryptography", normalizedLabel: "cryptography", useCount: 2 },
+      { label: "number theory", normalizedLabel: "number theory", useCount: 2 },
+    ],
+    textContextRelationships: [{ left: "cryptography", right: "number theory", useCount: 1 }],
+    editableTextContexts: [],
+  });
+
+  render(<App />);
+
+  fireEvent.keyDown(window, { key: "ArrowLeft" });
+
+  await waitFor(() => {
+    expect(cytoscapeMock.lastElements()).toHaveLength(3);
+  });
+  const settledInstanceCount = cytoscapeMock.instanceCount();
+
+  emitGraphNodeTap("cryptography");
+
+  const graphPanel = screen.getByLabelText("Concept Graph panel");
+  expect(await within(graphPanel).findByText("Focused: cryptography")).toBeInTheDocument();
+  expect(cytoscapeMock.instanceCount()).toBe(settledInstanceCount);
+
+  emitGraphEdgeTap("cryptography", "number theory");
+
+  expect(await within(graphPanel).findByText("Focused: cryptography + number theory")).toBeInTheDocument();
+  expect(cytoscapeMock.instanceCount()).toBe(settledInstanceCount);
 });
 
 test("graph filtering delegates note lookup to the text-context backend path", async () => {

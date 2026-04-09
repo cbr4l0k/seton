@@ -12,6 +12,11 @@ type ConceptGraphFilter =
   | { kind: "text_context"; label: string }
   | { kind: "relationship"; left: string; right: string };
 
+type GraphVisualState = {
+  focusedItem: ConceptGraphFilter | null;
+  relatedLabels: Set<string>;
+};
+
 type ConceptGraphPanelProps = {
   active: boolean;
   focusedItem: ConceptGraphFilter | null;
@@ -32,6 +37,8 @@ export function ConceptGraphPanel({
   selection,
 }: ConceptGraphPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const cyRef = useRef<cytoscape.Core | null>(null);
+  const onFocusSelectRef = useRef(onFocusSelect);
   const [hoveredNode, setHoveredNode] = useState<{ label: string; x: number; y: number } | null>(null);
   const relatedLabels = useMemo(
     () => new Set(selection.textContextLabels.map(normalizeTextContextLabel)),
@@ -39,15 +46,24 @@ export function ConceptGraphPanel({
   );
   const selectedContextCount = selection.textContextLabels.length;
   const graphElements = useMemo(
-    () =>
-      buildGraphElements(
-        knownTextContexts,
-        textContextRelationships,
-        relatedLabels,
-        focusedItem,
-      ),
-    [focusedItem, knownTextContexts, relatedLabels, textContextRelationships],
+    () => buildGraphElements(knownTextContexts, textContextRelationships),
+    [knownTextContexts, textContextRelationships],
   );
+  const graphStructureKey = useMemo(
+    () =>
+      JSON.stringify({
+        contexts: knownTextContexts.map((context) => context.normalizedLabel),
+        relationships: textContextRelationships.map((relationship) => [
+          normalizeTextContextLabel(relationship.left),
+          normalizeTextContextLabel(relationship.right),
+        ]),
+      }),
+    [knownTextContexts, textContextRelationships],
+  );
+
+  useEffect(() => {
+    onFocusSelectRef.current = onFocusSelect;
+  }, [onFocusSelect]);
 
   useEffect(() => {
     if (!active || !containerRef.current) {
@@ -66,15 +82,16 @@ export function ConceptGraphPanel({
       style: graphStylesheet,
       userPanningEnabled: true,
       userZoomingEnabled: true,
-      minZoom: 0.65,
+      minZoom: 0.18,
       maxZoom: 2.4,
-      wheelSensitivity: 0.18,
+      wheelSensitivity: 0.12,
     });
+    cyRef.current = cy;
 
     cy.on("tap", "node", (event) => {
       const label = event.target.data("label");
       if (typeof label === "string") {
-        onFocusSelect({ kind: "text_context", label });
+        onFocusSelectRef.current({ kind: "text_context", label });
       }
     });
 
@@ -83,7 +100,7 @@ export function ConceptGraphPanel({
       const right = event.target.data("right");
 
       if (typeof left === "string" && typeof right === "string") {
-        onFocusSelect({ kind: "relationship", left, right });
+        onFocusSelectRef.current({ kind: "relationship", left, right });
       }
     });
 
@@ -124,9 +141,72 @@ export function ConceptGraphPanel({
     cy.fit(undefined, 18);
 
     return () => {
+      cyRef.current = null;
+      setHoveredNode(null);
       cy.destroy();
     };
-  }, [active, graphElements, onFocusSelect]);
+  }, [active, graphElements]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!active || !cy) {
+      return;
+    }
+
+    cy.elements().remove();
+    cy.add(graphElements);
+    cy.layout({
+      animate: false,
+      fit: true,
+      name: "cose",
+      padding: 18,
+    }).run();
+    cy.resize();
+    cy.fit(undefined, 18);
+  }, [active, graphElements, graphStructureKey]);
+
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!active || !cy) {
+      return;
+    }
+
+    cy.elements().removeClass("is-related is-focused");
+
+    for (const element of cy.elements()) {
+      const kind = element.data("kind");
+
+      if (kind === "text_context") {
+        const label = normalizeTextContextLabel(String(element.data("label") ?? ""));
+        if (relatedLabels.has(label)) {
+          element.addClass("is-related");
+        }
+
+        const focused =
+          focusedItem?.kind === "text_context" &&
+          normalizeTextContextLabel(focusedItem.label) === label;
+        if (focused) {
+          element.addClass("is-focused");
+        }
+      }
+
+      if (kind === "relationship") {
+        const left = normalizeTextContextLabel(String(element.data("left") ?? ""));
+        const right = normalizeTextContextLabel(String(element.data("right") ?? ""));
+        if (relatedLabels.has(left) && relatedLabels.has(right)) {
+          element.addClass("is-related");
+        }
+
+        const focused =
+          focusedItem?.kind === "relationship" &&
+          normalizeTextContextLabel(focusedItem.left) === left &&
+          normalizeTextContextLabel(focusedItem.right) === right;
+        if (focused) {
+          element.addClass("is-focused");
+        }
+      }
+    }
+  }, [active, focusedItem, relatedLabels]);
 
   return (
     <section aria-label="Concept Graph panel" className="panel panel-left concept-graph-panel" data-active={active}>
@@ -191,18 +271,13 @@ export function ConceptGraphPanel({
 function buildGraphElements(
   knownTextContexts: KnownTextContext[],
   textContextRelationships: TextContextRelationship[],
-  relatedLabels: Set<string>,
-  focusedItem: ConceptGraphFilter | null,
+  visualState?: GraphVisualState,
 ): ElementDefinition[] {
   const degreeByLabel = buildRelationshipDegreeMap(textContextRelationships);
 
   return [
     ...knownTextContexts.map((context) => {
       const normalizedLabel = normalizeTextContextLabel(context.label);
-      const focused =
-        focusedItem?.kind === "text_context" &&
-        normalizeTextContextLabel(focusedItem.label) === normalizedLabel;
-
       return {
         data: {
           id: `text_context:${context.normalizedLabel}`,
@@ -213,18 +288,17 @@ function buildGraphElements(
           useCount: context.useCount,
         },
         classes: buildGraphClasses({
-          focused,
-          related: relatedLabels.has(normalizedLabel),
+          focused:
+            visualState?.focusedItem?.kind === "text_context" &&
+            normalizeTextContextLabel(visualState.focusedItem.label) ===
+              normalizeTextContextLabel(context.label),
+          related: visualState?.relatedLabels.has(normalizeTextContextLabel(context.label)) ?? false,
         }),
       } satisfies ElementDefinition;
     }),
     ...textContextRelationships.map((relationship) => {
       const left = normalizeTextContextLabel(relationship.left);
       const right = normalizeTextContextLabel(relationship.right);
-      const focused =
-        focusedItem?.kind === "relationship" &&
-        normalizeTextContextLabel(focusedItem.left) === left &&
-        normalizeTextContextLabel(focusedItem.right) === right;
 
       return {
         data: {
@@ -238,8 +312,13 @@ function buildGraphElements(
           useCount: relationship.useCount,
         },
         classes: buildGraphClasses({
-          focused,
-          related: relatedLabels.has(left) && relatedLabels.has(right),
+          focused:
+            visualState?.focusedItem?.kind === "relationship" &&
+            normalizeTextContextLabel(visualState.focusedItem.left) === left &&
+            normalizeTextContextLabel(visualState.focusedItem.right) === right,
+          related:
+            (visualState?.relatedLabels.has(left) ?? false) &&
+            (visualState?.relatedLabels.has(right) ?? false),
         }),
       } satisfies ElementDefinition;
     }),
@@ -292,12 +371,10 @@ const graphStylesheet: StylesheetJson = [
   {
     selector: "edge",
     style: {
-      "curve-style": "bezier",
+      "curve-style": "haystack",
       "font-family": "Departure Mono, monospace",
       "font-size": "9",
       "line-color": "#b7b0a1",
-      "target-arrow-color": "#b7b0a1",
-      "target-arrow-shape": "triangle",
       width: "2",
     },
   },
