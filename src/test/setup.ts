@@ -39,3 +39,19 @@ if (!Range.prototype.getClientRects) {
       [Symbol.iterator]: function* iterator() {},
     }) as DOMRectList;
 }
+
+if (!URL.createObjectURL) {
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    value: () => "blob:mock-preview",
+    writable: true,
+  });
+}
+
+if (!URL.revokeObjectURL) {
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    value: () => {},
+    writable: true,
+  });
+}

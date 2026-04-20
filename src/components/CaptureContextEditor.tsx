@@ -1,13 +1,24 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { KnownTextContext, TextContextRelationship } from "../lib/types";
 import { basename } from "../lib/path";
-import { pickImageFile } from "../lib/tauri";
+import { assetUrlForPath, pickImageFile } from "../lib/tauri";
 
 export type DraftCaptureContext =
   | { id: string; kind: "text"; value: string }
   | { id: string; kind: "url"; url: string; label: string }
-  | { id: string; kind: "image"; sourcePath: string | null; label: string };
+  | {
+      id: string;
+      kind: "image";
+      sourcePath: string | null;
+      managedPath: string | null;
+      pastedImage: {
+        bytes: number[];
+        mimeType: string;
+        fileName: string | null;
+      } | null;
+      label: string;
+    };
 
 type CaptureContextEditorProps = {
   active: boolean;
@@ -30,6 +41,10 @@ export function CaptureContextEditor({
 }: CaptureContextEditorProps) {
   const [draft, setDraft] = useState("");
   const [activeSuggestionLabel, setActiveSuggestionLabel] = useState<string | null>(null);
+  const imageContexts = contexts.filter(
+    (context): context is Extract<DraftCaptureContext, { kind: "image" }> => context.kind === "image",
+  );
+  const nonImageContexts = contexts.filter((context) => context.kind !== "image");
 
   const suggestions = active
     ? rankTextContextSuggestions({
@@ -113,12 +128,14 @@ export function CaptureContextEditor({
         id: crypto.randomUUID(),
         kind: "image",
         sourcePath,
+        managedPath: null,
+        pastedImage: null,
         label: basename(sourcePath),
       }),
     );
   }
 
-  function handlePaste(event: React.ClipboardEvent<HTMLInputElement>) {
+  async function handlePaste(event: React.ClipboardEvent<HTMLInputElement>) {
     const items = Array.from(event.clipboardData.items);
     const imageItem = items.find((item) => item.type.startsWith("image/"));
     if (!imageItem) {
@@ -127,10 +144,21 @@ export function CaptureContextEditor({
 
     event.preventDefault();
     const file = imageItem.getAsFile();
+    if (!file) {
+      return;
+    }
+
+    const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
     onChange(
       appendUniqueContext(contexts, {
         id: crypto.randomUUID(),
         kind: "image",
+        managedPath: null,
+        pastedImage: {
+          bytes,
+          mimeType: file.type || "application/octet-stream",
+          fileName: file.name || null,
+        },
         sourcePath: null,
         label: file?.name || "Pasted image",
       }),
@@ -226,9 +254,22 @@ export function CaptureContextEditor({
         </div>
       ) : null}
 
-      {contexts.length > 0 ? (
+      {imageContexts.length > 0 ? (
+        <div className="capture-contexts__media">
+          {imageContexts.map((context) => (
+            <ImageContextPreview
+              key={context.id}
+              context={context}
+              disabled={!active}
+              onRemove={() => removeContext(context.id)}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {nonImageContexts.length > 0 ? (
         <div className="capture-contexts__list">
-          {contexts.map((context) => (
+          {nonImageContexts.map((context) => (
             <button
               key={context.id}
               className={`context-chip context-chip--${context.kind}`}
@@ -242,6 +283,56 @@ export function CaptureContextEditor({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function ImageContextPreview({
+  context,
+  disabled,
+  onRemove,
+}: {
+  context: Extract<DraftCaptureContext, { kind: "image" }>;
+  disabled: boolean;
+  onRemove: () => void;
+}) {
+  const previewSrc = useMemo(() => {
+    if (context.pastedImage) {
+      const bytes = new Uint8Array(context.pastedImage.bytes);
+      const blob = new Blob([bytes], { type: context.pastedImage.mimeType });
+      return URL.createObjectURL(blob);
+    }
+
+    const path = context.managedPath ?? context.sourcePath;
+    return path ? assetUrlForPath(path) : null;
+  }, [context.managedPath, context.pastedImage, context.sourcePath]);
+
+  useEffect(() => {
+    if (!previewSrc || !context.pastedImage) {
+      return;
+    }
+
+    return () => {
+      URL.revokeObjectURL(previewSrc);
+    };
+  }, [context.pastedImage, previewSrc]);
+
+  return (
+    <button
+      aria-label={`Remove image ${context.label}`}
+      className="capture-contexts__media-item"
+      disabled={disabled}
+      type="button"
+      onClick={onRemove}
+    >
+      {previewSrc ? (
+        <img alt={context.label} className="capture-contexts__media-image" src={previewSrc} />
+      ) : (
+        <div aria-hidden="true" className="capture-contexts__media-fallback">
+          image
+        </div>
+      )}
+      <span className="capture-contexts__media-label">{context.label}</span>
+    </button>
   );
 }
 
@@ -259,7 +350,19 @@ function appendUniqueContext(
 
 function contextKey(context: DraftCaptureContext) {
   if (context.kind === "image") {
-    return `image:${(context.sourcePath ?? context.label).trim().toLowerCase()}`;
+    if (context.managedPath) {
+      return `image:managed:${context.managedPath.trim().toLowerCase()}`;
+    }
+
+    if (context.sourcePath) {
+      return `image:source:${context.sourcePath.trim().toLowerCase()}`;
+    }
+
+    if (context.pastedImage) {
+      return `image:pasted:${context.pastedImage.mimeType}:${context.pastedImage.bytes.join(",")}`;
+    }
+
+    return `image:label:${context.label.trim().toLowerCase()}`;
   }
 
   if (context.kind === "url") {

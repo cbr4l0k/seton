@@ -94,7 +94,14 @@ export type NoteDetail = {
 export type CaptureContextDraftInput =
   | { kind: "text"; text: string }
   | { kind: "url"; url: string }
-  | { kind: "image"; sourcePath: string };
+  | { kind: "imageFile"; sourcePath: string }
+  | { kind: "imageManaged"; managedPath: string }
+  | {
+      kind: "imagePasted";
+      bytes: number[];
+      mimeType: string;
+      fileName: string | null;
+    };
 
 export type SaveNoteRequest = {
   noteId?: string;

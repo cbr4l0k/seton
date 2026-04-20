@@ -23,6 +23,7 @@ const mockLookupUrlLabels = vi.fn();
 const mockSearchNotes = vi.fn();
 const mockFilterNotesByTextContexts = vi.fn();
 const mockPickImageFile = vi.fn();
+const mockAssetUrlForPath = vi.fn((value: string) => value);
 const mockCreateCytoscape = vi.hoisted(() =>
   vi.fn(() => ({
     destroy: vi.fn(),
@@ -51,6 +52,7 @@ vi.mock("../lib/tauri", () => ({
   searchNotes: (query: string) => mockSearchNotes(query),
   filterNotesByTextContexts: (labels: string[]) => mockFilterNotesByTextContexts(labels),
   pickImageFile: () => mockPickImageFile(),
+  assetUrlForPath: (value: string) => mockAssetUrlForPath(value),
 }));
 
 function makeWorkspacePayload() {
@@ -162,6 +164,8 @@ beforeEach(() => {
   mockSearchNotes.mockReset();
   mockFilterNotesByTextContexts.mockReset();
   mockPickImageFile.mockReset();
+  mockAssetUrlForPath.mockReset();
+  mockAssetUrlForPath.mockImplementation((value: string) => value);
   mockOpenNote.mockResolvedValue(makeSavedNoteDetail());
   mockFilterNotesByTextContexts.mockResolvedValue([]);
 });
@@ -281,6 +285,59 @@ test("draft supports text, url, and image capture contexts", async () => {
   expect(await screen.findByText("context.png")).toBeInTheDocument();
 });
 
+test("saving a pasted image context includes image payload in the save request", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
+  mockSaveNote.mockResolvedValue({
+    ...makeSavedNoteDetail(),
+    body: "A note",
+    updatedAt: "2026-03-21T11:00:00Z",
+  });
+
+  render(<App />);
+
+  setThoughtEditorValue("A note");
+
+  const pastedFile = new File(["pixel-data"], "pasted-image.png", { type: "image/png" });
+  Object.defineProperty(pastedFile, "arrayBuffer", {
+    value: vi.fn(async () => new TextEncoder().encode("pixel-data").buffer),
+  });
+  fireEvent.paste(screen.getByLabelText("Context input"), {
+    clipboardData: {
+      items: [
+        {
+          type: "image/png",
+          getAsFile: () => pastedFile,
+        },
+      ],
+    },
+  });
+  expect(await screen.findByText("pasted-image.png")).toBeInTheDocument();
+
+  fireEvent.keyDown(getThoughtEditor(), {
+    key: "Enter",
+    ctrlKey: true,
+  });
+
+  await waitFor(() => {
+    expect(mockSaveNote).toHaveBeenCalled();
+  });
+
+  expect(mockSaveNote).toHaveBeenCalledWith(
+    expect.objectContaining({
+      captureContexts: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "imagePasted",
+        }),
+      ]),
+    }),
+  );
+});
+
 test("duplicate contexts are ignored", async () => {
   mockBootstrapWorkspace.mockResolvedValue({
     history: [],
@@ -340,6 +397,209 @@ test("saving a new note clears the body and preserves contexts for the next note
     expectThoughtEditorValue("");
   });
   expect(screen.getByText("https://example.com")).toBeInTheDocument();
+});
+
+test("ctrl enter in the context input saves the current draft", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
+  mockSaveNote.mockResolvedValue({
+    ...makeSavedNoteDetail(),
+    body: "A note",
+    updatedAt: "2026-03-21T11:00:00Z",
+  });
+
+  render(<App />);
+
+  setThoughtEditorValue("A note");
+  fireEvent.change(screen.getByLabelText("Context input"), {
+    target: { value: "https://example.com" },
+  });
+  fireEvent.keyDown(screen.getByLabelText("Context input"), {
+    key: "Enter",
+    ctrlKey: true,
+  });
+
+  await waitFor(() => {
+    expect(mockSaveNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: "A note",
+      }),
+    );
+  });
+});
+
+test("saving an opened note preserves managed image contexts", async () => {
+  mockBootstrapWorkspace.mockResolvedValue(makeWorkspacePayload());
+  mockOpenNote.mockResolvedValue({
+    ...makeSavedNoteDetail(),
+    captureContexts: [
+      {
+        id: "img-1",
+        kind: "image" as const,
+        textValue: null,
+        urlValue: null,
+        sourcePath: null,
+        managedPath: "/tmp/seton/capture-contexts/images/already-saved.png",
+      },
+    ],
+  });
+  mockSaveNote.mockResolvedValue({
+    ...makeSavedNoteDetail(),
+    body: "Seed note changed",
+    captureContexts: [
+      {
+        id: "img-1",
+        kind: "image" as const,
+        textValue: null,
+        urlValue: null,
+        sourcePath: null,
+        managedPath: "/tmp/seton/capture-contexts/images/already-saved.png",
+      },
+    ],
+  });
+
+  render(<App />);
+
+  expect(await screen.findByText("Seed note")).toBeInTheDocument();
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+  fireEvent.click(screen.getByText("Seed note"));
+  await waitFor(() => {
+    expect(screen.getByText("already-saved.png")).toBeInTheDocument();
+  });
+
+  setThoughtEditorValue("Seed note changed");
+  fireEvent.keyDown(getThoughtEditor(), {
+    key: "Enter",
+    ctrlKey: true,
+  });
+
+  await waitFor(() => {
+    expect(mockSaveNote).toHaveBeenCalled();
+  });
+
+  expect(mockSaveNote).toHaveBeenCalledWith(
+    expect.objectContaining({
+      noteId: "seed-note",
+      captureContexts: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "imageManaged",
+        }),
+      ]),
+    }),
+  );
+});
+
+test("empty-body save with image context keeps the image and shows guidance", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
+  mockPickImageFile.mockResolvedValue("/tmp/context.png");
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("button", { name: "Add image" }));
+  expect(await screen.findByText("context.png")).toBeInTheDocument();
+
+  fireEvent.keyDown(getThoughtEditor(), {
+    key: "Enter",
+    ctrlKey: true,
+  });
+
+  expect(mockSaveNote).not.toHaveBeenCalled();
+  expect(screen.getByText("add text before saving image context")).toBeInTheDocument();
+  expect(screen.getByText("context.png")).toBeInTheDocument();
+});
+
+test("failed save with image context shows an error and preserves the draft", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
+  mockPickImageFile.mockResolvedValue("/tmp/context.png");
+  mockSaveNote.mockRejectedValue(new Error("copy failed"));
+
+  render(<App />);
+
+  setThoughtEditorValue("A note");
+  fireEvent.click(screen.getByRole("button", { name: "Add image" }));
+  expect(await screen.findByText("context.png")).toBeInTheDocument();
+
+  fireEvent.keyDown(getThoughtEditor(), {
+    key: "Enter",
+    ctrlKey: true,
+  });
+
+  await waitFor(() => {
+    expect(screen.getByText("save failed: copy failed")).toBeInTheDocument();
+  });
+  expectThoughtEditorValue("A note");
+  expect(screen.getByText("context.png")).toBeInTheDocument();
+});
+
+test("failed save with tauri-style string rejection shows the backend message", async () => {
+  mockBootstrapWorkspace.mockResolvedValue({
+    history: [],
+    placeholders: [],
+    knownTextContexts: [],
+    textContextRelationships: [],
+  });
+  mockPickImageFile.mockResolvedValue("/tmp/context.png");
+  mockSaveNote.mockRejectedValue({ error: "managed image path is outside the workspace" });
+
+  render(<App />);
+
+  setThoughtEditorValue("A note");
+  fireEvent.click(screen.getByRole("button", { name: "Add image" }));
+  expect(await screen.findByText("context.png")).toBeInTheDocument();
+
+  fireEvent.keyDown(getThoughtEditor(), {
+    key: "Enter",
+    ctrlKey: true,
+  });
+
+  await waitFor(() => {
+    expect(
+      screen.getByText("save failed: managed image path is outside the workspace"),
+    ).toBeInTheDocument();
+  });
+  expectThoughtEditorValue("A note");
+  expect(screen.getByText("context.png")).toBeInTheDocument();
+});
+
+test("opened notes render image previews for managed image contexts", async () => {
+  mockBootstrapWorkspace.mockResolvedValue(makeWorkspacePayload());
+  mockOpenNote.mockResolvedValue({
+    ...makeSavedNoteDetail(),
+    captureContexts: [
+      {
+        id: "img-1",
+        kind: "image" as const,
+        textValue: null,
+        urlValue: null,
+        sourcePath: null,
+        managedPath: "/tmp/seton/capture-contexts/images/already-saved.png",
+      },
+    ],
+  });
+  mockAssetUrlForPath.mockReturnValue("asset://localhost/preview.png");
+
+  render(<App />);
+
+  expect(await screen.findByText("Seed note")).toBeInTheDocument();
+  fireEvent.keyDown(window, { key: "ArrowDown" });
+  fireEvent.click(screen.getByText("Seed note"));
+
+  const image = await screen.findByRole("img", { name: "already-saved.png" });
+  expect(image).toHaveAttribute("src", "asset://localhost/preview.png");
 });
 
 test("saved url contexts live-update after background title resolution", async () => {

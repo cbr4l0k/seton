@@ -47,6 +47,36 @@ type GraphTarget =
   | { kind: "text_context"; label: string }
   | { kind: "relationship"; left: string; right: string };
 
+function describeUnknownError(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+
+  if (typeof error === "object" && error !== null) {
+    if ("message" in error && typeof error.message === "string" && error.message.trim()) {
+      return error.message;
+    }
+
+    if ("error" in error) {
+      const nested = describeUnknownError(error.error);
+      if (nested !== "unknown error") {
+        return nested;
+      }
+    }
+
+    const serialized = JSON.stringify(error);
+    if (serialized && serialized !== "{}") {
+      return serialized;
+    }
+  }
+
+  return "unknown error";
+}
+
 export default function App() {
   const editorRef = useRef<MarkdownEditorHandle | null>(null);
   const urlLabelPollTimeout = useRef<number | null>(null);
@@ -154,7 +184,10 @@ export default function App() {
 
   useEffect(() => {
     function isEditorSaveTarget(target: EventTarget | null) {
-      return target instanceof HTMLElement && target.closest(".markdown-editor, textarea") !== null;
+      return (
+        target instanceof HTMLElement &&
+        target.closest(".markdown-editor, textarea, .capture-contexts") !== null
+      );
     }
 
     function handleKeyDown(event: KeyboardEvent) {
@@ -411,6 +444,11 @@ export default function App() {
 
   async function attemptSave() {
     if (!body.trim()) {
+      if (contexts.some((context) => context.kind === "image")) {
+        setToastMessage("add text before saving image context");
+        return;
+      }
+
       if (contexts.length > 0) {
         clearEditor({ clearContexts: true });
       }
@@ -422,7 +460,12 @@ export default function App() {
       return;
     }
 
-    await commitSave(requestAnalysisAfterSave);
+    try {
+      await commitSave(requestAnalysisAfterSave);
+    } catch (error) {
+      const message = describeUnknownError(error);
+      setToastMessage(`save failed: ${message}`);
+    }
   }
 
   async function handleExportSelectedNotes() {
@@ -681,6 +724,8 @@ function mapCaptureContextToDraft(context: CaptureContext): DraftCaptureContext 
       id: context.id,
       kind: "image",
       sourcePath: context.sourcePath,
+      managedPath: context.managedPath,
+      pastedImage: null,
       label: context.managedPath?.split(/[\\/]/).pop() ?? context.sourcePath?.split(/[\\/]/).pop() ?? "image",
     };
   }
@@ -705,9 +750,26 @@ function mapDraftContextToSaveInput(context: DraftCaptureContext) {
   type SaveCaptureContextInput = SaveNoteRequest["captureContexts"][number];
 
   if (context.kind === "image") {
-    return context.sourcePath
-      ? ([{ kind: "image", sourcePath: context.sourcePath }] satisfies SaveCaptureContextInput[])
-      : [];
+    if (context.sourcePath) {
+      return [{ kind: "imageFile", sourcePath: context.sourcePath }] satisfies SaveCaptureContextInput[];
+    }
+
+    if (context.managedPath) {
+      return [{ kind: "imageManaged", managedPath: context.managedPath }] satisfies SaveCaptureContextInput[];
+    }
+
+    if (context.pastedImage) {
+      return [
+        {
+          kind: "imagePasted",
+          bytes: context.pastedImage.bytes,
+          mimeType: context.pastedImage.mimeType,
+          fileName: context.pastedImage.fileName,
+        },
+      ] satisfies SaveCaptureContextInput[];
+    }
+
+    return [];
   }
 
   if (context.kind === "url") {

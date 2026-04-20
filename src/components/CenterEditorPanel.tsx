@@ -33,7 +33,9 @@ export function CenterEditorPanel({
       contexts.some(
         (context) =>
           context.kind === "image" &&
-          (context.sourcePath ?? context.label).trim().toLowerCase() === label.trim().toLowerCase(),
+          (context.managedPath ?? context.sourcePath ?? context.label)
+            .trim()
+            .toLowerCase() === label.trim().toLowerCase(),
       )
     ) {
       return;
@@ -45,6 +47,8 @@ export function CenterEditorPanel({
         id: crypto.randomUUID(),
         kind: "image",
         sourcePath: null,
+        managedPath: null,
+        pastedImage: null,
         label,
       },
     ]);

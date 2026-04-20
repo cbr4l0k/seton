@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
 import type { NoteDetail, NoteSearchResult, RecentNote, SaveNoteRequest, UrlLabelLookup, WorkspacePayload } from "./types";
@@ -69,8 +69,16 @@ export async function lookupUrlLabels(urls: string[]): Promise<UrlLabelLookup[]>
 export async function pickImageFile(): Promise<string | null> {
   const result = await open({
     multiple: false,
-    filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }],
+    filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
   });
 
   return typeof result === "string" ? result : null;
+}
+
+export function assetUrlForPath(path: string): string {
+  try {
+    return convertFileSrc(path);
+  } catch {
+    return path;
+  }
 }
