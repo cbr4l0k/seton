@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ffi::OsStr;
 use std::future::Future;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -1196,12 +1196,10 @@ async fn persist_capture_context(
                 updated_at: now,
             }
         }
-        CaptureContextInput::Image { source_path } => {
+        CaptureContextInput::ImageFile { source_path } => {
             let source = Path::new(source_path);
             let extension = source.extension().and_then(OsStr::to_str).unwrap_or("bin");
-            let managed_path = paths
-                .images_dir
-                .join(format!("{}.{}", Uuid::new_v4(), extension));
+            let managed_path = next_managed_image_path(paths, extension);
 
             std::fs::copy(source, &managed_path)?;
 
@@ -1222,9 +1220,95 @@ async fn persist_capture_context(
                 updated_at: now,
             }
         }
+        CaptureContextInput::ImageManaged { managed_path } => {
+            let validated_path = validate_managed_image_path(paths, managed_path)?;
+
+            CaptureContext {
+                id,
+                note_id: note_id.to_string(),
+                kind: CaptureContextKind::Image,
+                text_context_id: None,
+                text_value: None,
+                url_value: None,
+                display_label: None,
+                url_title_status: None,
+                url_title_error: None,
+                url_title_fetched_at: None,
+                source_path: None,
+                managed_path: Some(validated_path.display().to_string()),
+                created_at: now.clone(),
+                updated_at: now,
+            }
+        }
+        CaptureContextInput::ImagePasted {
+            bytes,
+            mime_type,
+            file_name,
+        } => {
+            let extension = image_extension(file_name.as_deref(), mime_type);
+            let managed_path = next_managed_image_path(paths, &extension);
+            std::fs::write(&managed_path, bytes)?;
+
+            CaptureContext {
+                id,
+                note_id: note_id.to_string(),
+                kind: CaptureContextKind::Image,
+                text_context_id: None,
+                text_value: None,
+                url_value: None,
+                display_label: None,
+                url_title_status: None,
+                url_title_error: None,
+                url_title_fetched_at: None,
+                source_path: None,
+                managed_path: Some(managed_path.display().to_string()),
+                created_at: now.clone(),
+                updated_at: now,
+            }
+        }
     };
 
     Ok(context)
+}
+
+fn next_managed_image_path(paths: &AppPaths, extension: &str) -> PathBuf {
+    paths
+        .images_dir
+        .join(format!("{}.{}", Uuid::new_v4(), extension))
+}
+
+fn validate_managed_image_path(paths: &AppPaths, managed_path: &str) -> Result<PathBuf, std::io::Error> {
+    let canonical_images_dir = std::fs::canonicalize(&paths.images_dir)?;
+    let canonical_managed_path = std::fs::canonicalize(managed_path)?;
+
+    if !canonical_managed_path.starts_with(&canonical_images_dir) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "managed image path must stay inside app storage",
+        ));
+    }
+
+    Ok(canonical_managed_path)
+}
+
+fn image_extension(file_name: Option<&str>, mime_type: &str) -> String {
+    if let Some(extension) = file_name
+        .and_then(|name| Path::new(name).extension())
+        .and_then(OsStr::to_str)
+        .filter(|value| !value.is_empty())
+    {
+        return extension.to_string();
+    }
+
+    match mime_type {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/bmp" => "bmp",
+        _ => "bin",
+    }
+    .to_string()
 }
 
 async fn find_or_create_text_context(
@@ -1555,9 +1639,23 @@ fn compute_content_hash(body: &str, capture_contexts: &[CaptureContextInput]) ->
                 hasher.update(b"url:");
                 hasher.update(url.trim().as_bytes());
             }
-            CaptureContextInput::Image { source_path } => {
-                hasher.update(b"image:");
+            CaptureContextInput::ImageFile { source_path } => {
+                hasher.update(b"image-file:");
                 hasher.update(source_path.as_bytes());
+            }
+            CaptureContextInput::ImageManaged { managed_path } => {
+                hasher.update(b"image-managed:");
+                hasher.update(managed_path.as_bytes());
+            }
+            CaptureContextInput::ImagePasted {
+                bytes,
+                mime_type,
+                file_name,
+            } => {
+                hasher.update(b"image-pasted:");
+                hasher.update(mime_type.as_bytes());
+                hasher.update(file_name.as_deref().unwrap_or("").as_bytes());
+                hasher.update(bytes);
             }
         }
     }
@@ -1829,7 +1927,7 @@ mod tests {
             .save_note(SaveNoteInput {
                 note_id: None,
                 body: "Image note".into(),
-                capture_contexts: vec![CaptureContextInput::Image {
+                capture_contexts: vec![CaptureContextInput::ImageFile {
                     source_path: fixture_png_path(),
                 }],
                 request_analysis: false,
@@ -1843,6 +1941,75 @@ mod tests {
             .find(|item| item.is_image())
             .unwrap();
         assert!(std::path::Path::new(image.managed_path().unwrap()).exists());
+    }
+
+    #[tokio::test]
+    async fn saves_pasted_image_contexts_into_managed_storage() {
+        let repo = test_repo().await;
+        let saved = repo
+            .save_note(SaveNoteInput {
+                note_id: None,
+                body: "Pasted image note".into(),
+                capture_contexts: vec![CaptureContextInput::ImagePasted {
+                    bytes: fs::read(fixture_png_path()).unwrap(),
+                    mime_type: "image/png".into(),
+                    file_name: Some("pasted-image.png".into()),
+                }],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+
+        let image = saved
+            .capture_contexts
+            .into_iter()
+            .find(|item| item.is_image())
+            .unwrap();
+        assert!(image.source_path.is_none());
+        assert!(std::path::Path::new(image.managed_path().unwrap()).exists());
+    }
+
+    #[tokio::test]
+    async fn preserves_existing_managed_image_contexts_on_resave() {
+        let repo = test_repo().await;
+        let original = repo
+            .save_note(SaveNoteInput {
+                note_id: Some("managed-image-note".into()),
+                body: "First".into(),
+                capture_contexts: vec![CaptureContextInput::ImageFile {
+                    source_path: fixture_png_path(),
+                }],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+
+        let managed_path = original
+            .capture_contexts
+            .iter()
+            .find(|item| item.is_image())
+            .and_then(|item| item.managed_path().map(str::to_string))
+            .unwrap();
+
+        let saved = repo
+            .save_note(SaveNoteInput {
+                note_id: Some("managed-image-note".into()),
+                body: "Second".into(),
+                capture_contexts: vec![CaptureContextInput::ImageManaged {
+                    managed_path: managed_path.clone(),
+                }],
+                request_analysis: false,
+            })
+            .await
+            .unwrap();
+
+        let image = saved
+            .capture_contexts
+            .into_iter()
+            .find(|item| item.is_image())
+            .unwrap();
+        assert_eq!(image.managed_path(), Some(managed_path.as_str()));
+        assert!(std::path::Path::new(&managed_path).exists());
     }
 
     #[tokio::test]

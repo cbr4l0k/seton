@@ -2,7 +2,13 @@
 pub enum CaptureContextInput {
     Text { text: String },
     Url { url: String },
-    Image { source_path: String },
+    ImageFile { source_path: String },
+    ImageManaged { managed_path: String },
+    ImagePasted {
+        bytes: Vec<u8>,
+        mime_type: String,
+        file_name: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug)]

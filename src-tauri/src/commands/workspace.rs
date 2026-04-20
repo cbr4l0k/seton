@@ -126,9 +126,20 @@ pub struct SaveNoteRequest {
 #[derive(Clone, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum CaptureContextRequest {
+    #[serde(rename_all = "camelCase")]
     Text { text: String },
+    #[serde(rename_all = "camelCase")]
     Url { url: String },
-    Image { source_path: String },
+    #[serde(rename_all = "camelCase")]
+    ImageFile { source_path: String },
+    #[serde(rename_all = "camelCase")]
+    ImageManaged { managed_path: String },
+    #[serde(rename_all = "camelCase")]
+    ImagePasted {
+        bytes: Vec<u8>,
+        mime_type: String,
+        file_name: Option<String>,
+    },
 }
 
 #[derive(Clone, serde::Deserialize)]
@@ -439,7 +450,17 @@ impl From<CaptureContextRequest> for CaptureContextInput {
         match value {
             CaptureContextRequest::Text { text } => Self::Text { text },
             CaptureContextRequest::Url { url } => Self::Url { url },
-            CaptureContextRequest::Image { source_path } => Self::Image { source_path },
+            CaptureContextRequest::ImageFile { source_path } => Self::ImageFile { source_path },
+            CaptureContextRequest::ImageManaged { managed_path } => Self::ImageManaged { managed_path },
+            CaptureContextRequest::ImagePasted {
+                bytes,
+                mime_type,
+                file_name,
+            } => Self::ImagePasted {
+                bytes,
+                mime_type,
+                file_name,
+            },
         }
     }
 }
@@ -466,6 +487,7 @@ impl From<TextContextRelationship> for TextContextRelationshipDto {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
     use tempfile::TempDir;
 
     use crate::app_state::{build_app_paths, AppState};
@@ -475,7 +497,7 @@ mod tests {
 
     use super::{
         bootstrap_workspace_with_state, filter_notes_by_text_contexts_with_state,
-        search_notes_with_state, FilterNotesByTextContextsRequest,
+        search_notes_with_state, CaptureContextRequest, FilterNotesByTextContextsRequest,
     };
 
     #[tokio::test]
@@ -553,6 +575,41 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "older-context-note");
         assert_eq!(results[0].preview, "How to download the images note");
+    }
+
+    #[test]
+    fn capture_context_request_accepts_camel_case_image_fields() {
+        let image_file: CaptureContextRequest = serde_json::from_value(json!({
+            "kind": "imageFile",
+            "sourcePath": "/tmp/context.png"
+        }))
+        .unwrap();
+        let image_managed: CaptureContextRequest = serde_json::from_value(json!({
+            "kind": "imageManaged",
+            "managedPath": "/tmp/seton/images/context.png"
+        }))
+        .unwrap();
+        let image_pasted: CaptureContextRequest = serde_json::from_value(json!({
+            "kind": "imagePasted",
+            "bytes": [137, 80, 78, 71],
+            "mimeType": "image/png",
+            "fileName": "clip.png"
+        }))
+        .unwrap();
+
+        assert!(matches!(
+            image_file,
+            CaptureContextRequest::ImageFile { source_path } if source_path == "/tmp/context.png"
+        ));
+        assert!(matches!(
+            image_managed,
+            CaptureContextRequest::ImageManaged { managed_path } if managed_path == "/tmp/seton/images/context.png"
+        ));
+        assert!(matches!(
+            image_pasted,
+            CaptureContextRequest::ImagePasted { mime_type, file_name, .. }
+                if mime_type == "image/png" && file_name.as_deref() == Some("clip.png")
+        ));
     }
 
     async fn seeded_state_with_recent_note() -> AppState {
@@ -700,7 +757,7 @@ mod tests {
                     CaptureContextInput::Url {
                         url: "https://example.com".into(),
                     },
-                    CaptureContextInput::Image {
+                    CaptureContextInput::ImageFile {
                         source_path: fixture_png_path(),
                     },
                 ],
